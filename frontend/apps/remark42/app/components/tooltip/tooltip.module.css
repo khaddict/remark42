@@ -25,15 +25,6 @@
   visibility: visible;
 }
 
-.rootVisible {
-  opacity: 1;
-  visibility: visible;
-}
-
-.permanent {
-  display: block;
-}
-
 .top-left {
   margin-bottom: 10px;
   bottom: 100%;

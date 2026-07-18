@@ -24,7 +24,7 @@ type Service struct {
 	cancel context.CancelFunc
 }
 
-// Destination defines interface for a given destination service, like telegram, email and so on
+// Destination defines interface for a given destination service, like email and so on
 type Destination interface {
 	fmt.Stringer
 	Send(context.Context, Request) error
@@ -35,18 +35,16 @@ type Destination interface {
 type Store interface {
 	Get(locator store.Locator, id string, user store.User) (store.Comment, error)
 	GetUserEmail(siteID, userID string) (string, error)
-	GetUserTelegram(siteID, userID string) (string, error)
 }
 
-// used for email and telegram retrieval from user details
+// used for email retrieval from user details
 type getUserDetail func(string, string) (string, error)
 
 // Request notification for a Comment
 type Request struct {
-	Comment   store.Comment
-	parent    store.Comment
-	Emails    []string
-	Telegrams []string
+	Comment store.Comment
+	parent  store.Comment
+	Emails  []string
 }
 
 // VerificationRequest notification for user
@@ -90,7 +88,6 @@ func (s *Service) Submit(req Request) {
 		if p, err := s.dataService.Get(req.Comment.Locator, req.Comment.ParentID, store.User{}); err == nil {
 			req.parent = p
 			req.Emails = s.getNotificationTargets(req, p, s.dataService.GetUserEmail)
-			req.Telegrams = s.getNotificationTargets(req, p, s.dataService.GetUserTelegram)
 		}
 	}
 	select {
@@ -100,7 +97,7 @@ func (s *Service) Submit(req Request) {
 	}
 }
 
-// getNotificationTargets returns list of notification targets (like email or telegram username) for users
+// getNotificationTargets returns list of notification targets (like email) for users
 // interested in notifications for provided comment.
 // Targets are not added to the returned list in case the original message
 // is from the same user as the notification receiver.

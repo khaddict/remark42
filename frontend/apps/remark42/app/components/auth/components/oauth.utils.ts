@@ -1,18 +1,14 @@
 import { OAuthProvider, Theme } from 'common/types';
 import { capitalizeFirstLetter } from 'utils/capitalize-first-letter';
+import { siteId } from 'common/settings';
+import { BASE_URL } from 'common/constants.config';
 
 import { OAUTH_DATA } from './oauth.consts';
 
-export function getButtonVariant(num: number) {
-  if (num === 2) {
-    return 'name';
-  }
+const oauthReturnLocation = encodeURIComponent(`${window.location.origin}${window.location.pathname}?selfClose`);
 
-  if (num === 1) {
-    return 'full';
-  }
-
-  return 'icon';
+export function getOAuthLoginHref(provider: OAuthProvider) {
+  return `${BASE_URL}/auth/${provider}/login?from=${oauthReturnLocation}&site=${siteId}`;
 }
 
 export function getProviderData(provider: OAuthProvider, theme: Theme) {

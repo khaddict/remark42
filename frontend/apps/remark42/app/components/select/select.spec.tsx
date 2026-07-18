@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { fireEvent, screen, waitFor } from '@testing-library/preact';
+import { fireEvent, screen } from '@testing-library/preact';
 
 import { render } from 'tests/utils';
 import { Select } from './select';
@@ -13,29 +13,26 @@ const items = [
 ];
 
 describe('<Select/>', () => {
-  it('should has static class names', () => {
-    render(<Select items={items} selected={items[0]} />);
-    expect(screen.getByRole('combobox')).toHaveClass('select-element');
-    expect(screen.getByTestId('select-root')).toHaveClass('select');
-    expect(screen.getByTestId('select-arrow')).toHaveClass('select-arrow');
+  it('should render the selected item as the trigger label', () => {
+    render(<Select items={items} selected={items[1]} onChange={jest.fn()} />);
+    expect(screen.getByText('Oldest')).toBeInTheDocument();
   });
 
-  it('should render selected item', () => {
-    const selectedIndex = 1;
-    const selectedItem = items[selectedIndex];
+  it('should open the options list when the trigger is clicked', () => {
+    render(<Select items={items} selected={items[0]} onChange={jest.fn()} />);
 
-    render(<Select items={items} selected={selectedItem} />);
-    expect(screen.getAllByRole<HTMLOptionElement>('option')[selectedIndex].selected).toBeTruthy();
+    expect(screen.queryByText('Worst')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('None'));
+    expect(screen.getByText('Worst')).toBeInTheDocument();
   });
 
-  it('should highlight select on focus', async () => {
-    render(<Select items={items} selected={items[0]} />);
+  it('should call onChange with the clicked item value', () => {
+    const onChange = jest.fn();
+    render(<Select items={items} selected={items[0]} onChange={onChange} />);
 
-    fireEvent.focus(screen.getByRole('combobox'));
-    await waitFor(() => {
-      const rootElement = screen.getByTestId('select-root');
-      expect(rootElement).toHaveClass('select_focused');
-      expect(rootElement).toHaveClass('rootFocused');
-    });
+    fireEvent.click(screen.getByText('None'));
+    fireEvent.click(screen.getByText('Best'));
+
+    expect(onChange).toHaveBeenCalledWith('best');
   });
 });

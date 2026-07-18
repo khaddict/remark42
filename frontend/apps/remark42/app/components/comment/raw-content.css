@@ -83,6 +83,7 @@
     overflow: visible;
     padding: 0.05em 0.3em;
     font-size: 85%;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   & pre {
@@ -94,6 +95,7 @@
     line-height: 1.45;
     border-radius: 3px;
     background-color: var(--chroma-bg);
+    font-family: 'JetBrains Mono', monospace;
   }
 
   /* Syntax Highlight Colors */

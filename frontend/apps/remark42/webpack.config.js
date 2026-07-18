@@ -15,7 +15,7 @@ const incstr = require('incstr');
 const babelConfig = require('./.babelrc.js');
 
 const NODE_ID = 'remark42';
-const PUBLIC_PATH = '/web/';
+const PUBLIC_PATH = '/remark42/web/';
 const PORT = process.env.PORT || 9000;
 const REMARK_API_BASE_URL = process.env.REMARK_API_BASE_URL || 'http://127.0.0.1:8080';
 const DEVSERVER_BASE_PATH = process.env.DEVSERVER_BASE_PATH || `http://127.0.0.1:${PORT}`;
@@ -128,7 +128,14 @@ module.exports = (_, { mode, analyze }) => {
     exclude: [/\.module\.css$/, /node_modules/],
     use: [
       isDev ? 'style-loader' : MiniCssExtractPlugin.loader,
-      'css-loader',
+      {
+        loader: 'css-loader',
+        options: {
+          url: {
+            filter: (url) => !url.startsWith('/remark42/web/fonts/'),
+          },
+        },
+      },
       {
         loader: 'postcss-loader',
         options: {
@@ -300,6 +307,10 @@ module.exports = (_, { mode, analyze }) => {
           {
             from: path.resolve(__dirname, 'templates/400x400.jpeg'),
             to: PUBLIC_FOLDER_PATH,
+          },
+          {
+            from: path.resolve(__dirname, 'app/assets/fonts'),
+            to: path.resolve(PUBLIC_FOLDER_PATH, 'fonts'),
           },
         ],
       }),

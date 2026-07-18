@@ -1,34 +1,11 @@
-import { isJwtExpired } from 'utils/jwt';
 import { StaticStore } from 'common/static-store';
-import type { FormProvider, OAuthProvider } from 'common/types';
+import type { OAuthProvider } from 'common/types';
 
-import { messages } from './auth.messages';
 import { setItem, getItem } from 'common/local-storage';
 import { LS_EMAIL_KEY } from 'common/constants';
 
-export function getProviders(): [OAuthProvider[], FormProvider[]] {
-  const oauthProviders: OAuthProvider[] = [];
-  const formProviders: FormProvider[] = [];
-
-  StaticStore.config.auth_providers.forEach((p) => {
-    p === 'email' || p === 'anonymous'
-      ? formProviders.push(p as FormProvider)
-      : oauthProviders.push(p as OAuthProvider);
-  });
-
-  return [oauthProviders, formProviders];
-}
-
-export function getTokenInvalidReason(token: string): null | keyof typeof messages {
-  try {
-    if (isJwtExpired(token)) {
-      return 'expiredToken';
-    }
-  } catch (e) {
-    return 'invalidToken';
-  }
-
-  return null;
+export function getProviders(): OAuthProvider[] {
+  return StaticStore.config.auth_providers;
 }
 
 export function persistEmail(email: string) {

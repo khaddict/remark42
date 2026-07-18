@@ -3,7 +3,7 @@ import { Sorting, Theme } from './types';
 export { BASE_URL, API_BASE, NODE_ID, COMMENT_NODE_CLASSNAME_PREFIX } from './constants.config';
 export const MAX_SHOWN_ROOT_COMMENTS = 10;
 
-export const DEFAULT_SORT: Sorting = '-active';
+export const DEFAULT_SORT: Sorting = '-score';
 
 /** locastorage key for collapsed comments */
 export const LS_COLLAPSE_KEY = '__remarkCollapsed';

@@ -48,16 +48,3 @@ jobs:
           build-args: |
             SKIP_BACKEND_TEST=true
             SKIP_FRONTEND_TEST=true
-
-      - name: build example docker image without pushing
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: backend/_example/memory_store/Dockerfile
-          platforms: linux/amd64
-          load: true
-          cache-from: type=gha,scope=example
-          cache-to: type=gha,scope=example,mode=max,ignore-error=true
-          build-args: |
-            SKIP_BACKEND_TEST=true
-            SKIP_FRONTEND_TEST=true

@@ -852,11 +852,9 @@ func TestRest_AnonVote(t *testing.T) {
 	assert.Equal(t, map[string]store.VotedIPInfo(nil), cr.VotedIPs)
 }
 
-func TestRest_EmailAndTelegram(t *testing.T) {
+func TestRest_Email(t *testing.T) {
 	ts, srv, teardown := startupT(t)
 	defer teardown()
-
-	srv.privRest.telegramService = &mockTelegram{site: "remark42"}
 
 	// issue good token
 	claims := token.Claims{
@@ -902,19 +900,6 @@ func TestRest_EmailAndTelegram(t *testing.T) {
 		{description: "unsubscribe user, wrong token", url: "/email/unsubscribe.html?site=remark42&tkn=jwt", method: http.MethodGet, responseCode: http.StatusForbidden},
 		{description: "unsubscribe user, good token", url: fmt.Sprintf("/email/unsubscribe.html?site=remark42&tkn=%s", goodToken), method: http.MethodPost, responseCode: http.StatusOK},
 		{description: "unsubscribe user second time, good token", url: fmt.Sprintf("/email/unsubscribe.html?site=remark42&tkn=%s", goodToken), method: http.MethodPost, responseCode: http.StatusConflict},
-		{description: "issue delete request without auth", url: "/api/v1/telegram", method: http.MethodDelete, responseCode: http.StatusUnauthorized, noAuth: true},
-		{description: "issue delete request without site_id", url: "/api/v1/telegram", method: http.MethodDelete, responseCode: http.StatusForbidden},
-		{description: "delete non-existent user telegram", url: "/api/v1/telegram?site=remark42", method: http.MethodDelete, responseCode: http.StatusOK},
-		{description: "send telegram confirmation, no siteID", url: "/api/v1/telegram/subscribe", method: http.MethodGet, responseCode: http.StatusForbidden},
-		{description: "send telegram confirmation", url: "/api/v1/telegram/subscribe?site=remark42", method: http.MethodGet, responseCode: http.StatusOK},
-		{description: "set user telegram, token is good", url: "/api/v1/telegram/subscribe?site=remark42&tkn=good_token", method: http.MethodGet, responseCode: http.StatusOK},
-		{description: "send confirmation with same address", url: "/api/v1/telegram/subscribe?site=remark42", method: http.MethodGet, responseCode: http.StatusConflict},
-		{description: "delete user telegram", url: "/api/v1/telegram?site=remark42", method: http.MethodDelete, responseCode: http.StatusOK},
-		{description: "send another confirmation", url: "/api/v1/telegram/subscribe?site=remark42", method: http.MethodGet, responseCode: http.StatusOK},
-		{description: "set user telegram, token is good", url: "/api/v1/telegram/subscribe?site=remark42&tkn=good_token", method: http.MethodGet, responseCode: http.StatusOK},
-		// telegramSubscribeCtrl mutates state, so HEAD (which stdlib ServeMux would route to the
-		// GET handler) must be rejected by rejectHead before it runs
-		{description: "HEAD is rejected on telegram subscribe", url: "/api/v1/telegram/subscribe?site=remark42", method: http.MethodHead, responseCode: http.StatusMethodNotAllowed},
 	}
 	client := http.Client{}
 	defer client.CloseIdleConnections()
@@ -1195,202 +1180,6 @@ func TestRest_EmailNotification(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, store.User{Name: "good@example.com test user", ID: "email_f5dfe9d2e6bd75fc74ea5fabf273b45b5baeb195", EmailSubscription: true,
 		Picture: "http://example.com/pic.png", IP: "127.0.0.1", SiteID: "remark42"}, subscribedEmailUser)
-}
-
-func TestRest_TelegramNotification(t *testing.T) {
-	ts, srv, teardown := startupT(t)
-	defer teardown()
-
-	mockDestination := &notify.MockDest{}
-	srv.privRest.notifyService = notify.NewService(srv.DataService, 1, mockDestination)
-	defer srv.privRest.notifyService.Close()
-
-	client := http.Client{}
-	defer client.CloseIdleConnections()
-
-	// create new comment from dev user
-	req, err := http.NewRequest("POST", ts.URL+"/api/v1/comment?site=remark42", strings.NewReader(
-		`{"text": "test 123",
-"user": {"name": "provider1_dev::good@example.com"},
-"locator":{"url": "https://radio-t.com/blah1",
-"site": "remark42"}}`))
-	assert.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err := client.Do(req)
-	assert.NoError(t, err)
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
-	parentComment := store.Comment{}
-	require.NoError(t, json.Unmarshal(body, &parentComment))
-	// wait for mock notification Submit to kick off
-	time.Sleep(time.Millisecond * 30)
-	require.Equal(t, 1, len(mockDestination.Get()))
-	assert.Empty(t, mockDestination.Get()[0].Telegrams)
-
-	// create child comment from another user, telegram notification only to admin expected
-	req, err = http.NewRequest("POST", ts.URL+"/api/v1/comment?site=remark42", strings.NewReader(fmt.Sprintf(
-		`{"text": "test 456",
-	"pid": %q,
-	"user": {"name": "other_user"},
-	"locator":{"url": "https://radio-t.com/blah1",
-	"site": "remark42"}}`, parentComment.ID)))
-	assert.NoError(t, err)
-	req.Header.Add("X-JWT", anonToken)
-	resp, err = client.Do(req)
-	assert.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
-	// wait for mock notification Submit to kick off
-	time.Sleep(time.Millisecond * 30)
-	require.Equal(t, 2, len(mockDestination.Get()))
-	assert.Empty(t, mockDestination.Get()[1].Telegrams)
-
-	// subscribe to telegram while the telegram destination is absent
-	req, err = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/telegram/subscribe?site=remark42", http.NoBody)
-	require.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusInternalServerError, resp.StatusCode, string(body))
-	assert.Equal(t, `{"code":17,"details":"telegram notifications are not enabled","error":"not enabled"}`+"\n", string(body))
-
-	mockTlgrm := &mockTelegram{notVerified: true, site: "unknown_site"}
-	srv.privRest.telegramService = mockTlgrm
-	// send confirmation token for telegram
-	req, err = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/telegram/subscribe?site=remark42", http.NoBody)
-	require.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var subscribeRequest struct {
-		Bot   string `json:"bot"`
-		Token string `json:"token"`
-	}
-	err = json.Unmarshal(body, &subscribeRequest)
-	assert.NoError(t, err)
-	assert.Equal(t, "botUsername", subscribeRequest.Bot)
-
-	// verify telegram, unsuccessfully because of not verified
-	req, err = http.NewRequest(http.MethodGet, ts.URL+fmt.Sprintf("/api/v1/telegram/subscribe?site=remark42&tkn=%s", subscribeRequest.Token), http.NoBody)
-	require.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusNotFound, resp.StatusCode, string(body))
-	require.Equal(t, `{"code":0,"details":"request is not verified yet","error":"not verified"}`+"\n", string(body))
-
-	mockTlgrm.notVerified = false
-
-	// verify telegram, unsuccessfully because of unknown site
-	req, err = http.NewRequest(http.MethodGet, ts.URL+fmt.Sprintf("/api/v1/telegram/subscribe?site=remark42&tkn=%s", subscribeRequest.Token), http.NoBody)
-	require.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(body))
-	require.Equal(t, `{"code":0,"details":"can't set telegram for user","error":"site \"unknown_site\" not found"}`+"\n", string(body))
-
-	mockTlgrm.site = "remark42"
-	// verify telegram, successfully
-	req, err = http.NewRequest(http.MethodGet, ts.URL+fmt.Sprintf("/api/v1/telegram/subscribe?site=remark42&tkn=%s", subscribeRequest.Token), http.NoBody)
-	require.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var subscribeResult struct {
-		Address string `json:"address"`
-		Updated bool   `json:"updated"`
-	}
-	err = json.Unmarshal(body, &subscribeResult)
-	assert.NoError(t, err)
-	assert.True(t, subscribeResult.Updated)
-
-	// get user information to verify the subscription
-	req, err = http.NewRequest(http.MethodGet, ts.URL+"/api/v1/user?site=remark42", http.NoBody)
-	require.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-	var user store.User
-	err = json.Unmarshal(body, &user)
-	assert.NoError(t, err)
-	assert.Equal(t, store.User{Name: "developer one", ID: "provider1_dev",
-		Picture: "http://example.com/pic.png", IP: "127.0.0.1", SiteID: "remark42"}, user)
-
-	// create child comment from another user, telegram notification expected
-	req, err = http.NewRequest("POST", ts.URL+"/api/v1/comment?site=remark42", strings.NewReader(fmt.Sprintf(
-		`{"text": "test 789",
-	"pid": %q,
-	"user": {"name": "other_user"},
-	"locator":{"url": "https://radio-t.com/blah1",
-	"site": "remark42"}}`, parentComment.ID)))
-	assert.NoError(t, err)
-	req.Header.Add("X-JWT", anonToken)
-	resp, err = client.Do(req)
-	assert.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
-	// wait for mock notification Submit to kick off
-	time.Sleep(time.Millisecond * 30)
-	require.Equal(t, 3, len(mockDestination.Get()))
-	assert.Equal(t, []string{"good_telegram"}, mockDestination.Get()[2].Telegrams)
-
-	// delete user's telegram
-	req, err = http.NewRequest(http.MethodDelete, ts.URL+"/api/v1/telegram?site=remark42", http.NoBody)
-	require.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	assert.Equal(t, http.StatusOK, resp.StatusCode, string(body))
-
-	// create child comment from another user, no telegram notification
-	req, err = http.NewRequest("POST", ts.URL+"/api/v1/comment?site=remark42", strings.NewReader(
-		`{"text": "test 321",
-	"user": {"name": "other_user"},
-	"locator":{"url": "https://radio-t.com/blah1",
-	"site": "remark42"}}`))
-	assert.NoError(t, err)
-	req.Header.Add("X-JWT", devToken)
-	resp, err = client.Do(req)
-	assert.NoError(t, err)
-	body, err = io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	require.NoError(t, resp.Body.Close())
-	require.Equal(t, http.StatusCreated, resp.StatusCode, string(body))
-	// wait for mock notification Submit to kick off
-	time.Sleep(time.Millisecond * 30)
-	require.Equal(t, 4, len(mockDestination.Get()))
-	assert.Empty(t, mockDestination.Get()[3].Telegrams)
 }
 
 func TestRest_UserAllData(t *testing.T) {
@@ -1677,24 +1466,6 @@ func TestRest_CreateWithPictures(t *testing.T) {
 		_, err = os.Stat("/tmp/remark42/images/" + ids[i])
 		assert.NoError(t, err, "picture %d moved from staging and available in permanent location", i)
 	}
-}
-
-type mockTelegram struct {
-	notVerified bool
-	site        string
-}
-
-func (m *mockTelegram) AddToken(string, string, string, time.Time) {}
-
-func (m *mockTelegram) GetBotUsername() string {
-	return "botUsername"
-}
-
-func (m *mockTelegram) CheckToken(string, string) (telegram, site string, err error) {
-	if m.notVerified {
-		return "", "", fmt.Errorf("not verified")
-	}
-	return "good_telegram", m.site, nil
 }
 
 func TestExtractIP(t *testing.T) {

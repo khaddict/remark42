@@ -2,10 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"path"
 
 	log "github.com/go-pkgz/lgr"
-	bolt "go.etcd.io/bbolt"
 
 	"github.com/go-pkgz/auth/v2/avatar"
 )
@@ -75,11 +73,8 @@ func (ac *AvatarCommand) makeAvatarStore(gr AvatarGroup) (avatar.Store, error) {
 			return nil, fmt.Errorf("failed to create avatar store: %w", err)
 		}
 		return avatar.NewLocalFS(gr.FS.Path), nil
-	case "bolt":
-		if err := makeDirs(path.Dir(gr.Bolt.File)); err != nil {
-			return nil, fmt.Errorf("failed to create avatar store: %w", err)
-		}
-		return avatar.NewBoltDB(gr.Bolt.File, bolt.Options{})
+	case "uri":
+		return avatar.NewStore(gr.URI)
 	}
 	return nil, fmt.Errorf("unsupported avatar store type %s", gr.Type)
 }

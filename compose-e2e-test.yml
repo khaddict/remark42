@@ -13,16 +13,12 @@ services:
     container_name: "remark42"
 
     environment:
-      # remark42 hostname used for proper dev auth work for tests container which connects to it
-      # using the such hostname (unlike local development where 127.0.0.1 is used)
+      # remark42 hostname the tests container uses to reach this service
+      # (unlike local development where 127.0.0.1 is used)
       - REMARK_URL=http://remark42:8080
       - SECRET=12345
       - DEBUG=true
       - ADMIN_PASSWD=password
-      - AUTH_DEV=true # activate local OAuth "dev" listening on http://remark42:8084
-      - ADMIN_SHARED_ID=dev_user # set admin flag for default user on local oauth2
-      - AUTH_ANON=true
-      - AUTH_EMAIL_ENABLE=true
     volumes:
       - ./var:/srv/var
 

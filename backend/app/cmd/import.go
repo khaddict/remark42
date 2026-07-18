@@ -15,7 +15,7 @@ import (
 // ImportCommand set of flags and command for import
 type ImportCommand struct {
 	InputFile string `short:"f" long:"file" description:"input file name" required:"true"`
-	Provider  string `short:"p" long:"provider" default:"disqus" choice:"disqus" choice:"wordpress" choice:"commento" description:"import format"` //nolint
+	Provider  string `short:"p" long:"provider" default:"native" choice:"native" description:"import format"` //nolint
 
 	SupportCmdOpts
 	CommonOpts

@@ -36,13 +36,11 @@ export interface Props extends OwnProps {
 
 interface State {
   isBlockedVisible: boolean;
-  anonymousUsernameInputValue: string;
 }
 
 class AuthPanelComponent extends Component<Props, State> {
   state = {
     isBlockedVisible: false,
-    anonymousUsernameInputValue: 'anon',
   };
 
   toggleBlockedVisibility = () => {

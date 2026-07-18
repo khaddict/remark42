@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { Theme } from 'common/types';
 import { sleep } from 'utils/sleep';
 import { Button } from 'components/button';
+import { ChevronDownIcon } from 'components/icons/chevron-down';
 import { parseMessage } from 'utils/post-message';
 
 import styles from './dropdown.module.css';
@@ -17,6 +18,7 @@ type Props = RenderableProps<{
   onTitleClick?: () => void;
   mix?: string;
   theme: Theme;
+  contentAlign?: 'left' | 'right';
   onOpen?: (root: HTMLDivElement) => unknown;
   onClose?: (root: HTMLDivElement) => unknown;
 }>;
@@ -177,7 +179,7 @@ export class Dropdown extends Component<Props, State> {
     window.removeEventListener('message', this.receiveMessage);
   }
 
-  render({ title, titleClass = '', children, mix, theme, disabled, buttonTitle }: Props, { isActive }: State) {
+  render({ title, titleClass = '', children, mix, theme, disabled, buttonTitle, contentAlign = 'left' }: Props, { isActive }: State) {
     return (
       <div
         className={clsx(
@@ -200,14 +202,15 @@ export class Dropdown extends Component<Props, State> {
           title={buttonTitle}
         >
           {title}
+          <ChevronDownIcon />
         </Button>
         {isActive && (
           <div
-            className={styles.content}
+            className={clsx(styles.content, contentAlign === 'right' && styles.contentAlignRight)}
             ref={this.contentRef}
             tabIndex={-1}
             role="listbox"
-            style={{ transform: `translateX(${this.state.contentTranslateX}px)` }}
+            style={contentAlign === 'right' ? undefined : { transform: `translateX(${this.state.contentTranslateX}px)` }}
           >
             <div className={styles.items}>{children}</div>
           </div>

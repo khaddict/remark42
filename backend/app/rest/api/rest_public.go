@@ -17,7 +17,6 @@ import (
 	log "github.com/go-pkgz/lgr"
 	R "github.com/go-pkgz/rest"
 	"github.com/google/uuid"
-	"github.com/skip2/go-qrcode"
 
 	"github.com/umputun/remark42/backend/app/rest"
 	"github.com/umputun/remark42/backend/app/store"
@@ -455,40 +454,6 @@ func (s *public) robotsCtrl(w http.ResponseWriter, _ *http.Request) {
 	}
 	responseText := fmt.Sprintf("User-agent: *\nDisallow: /auth/\nDisallow: /api/\n%s\n", strings.Join(allowed, "\n"))
 	rest.PlainTextResponse(w, http.StatusOK, responseText)
-}
-
-// GET /qr/telegram - generates QR for provided URL, used for Telegram auth and notifications subscription. The first
-// step of both is the user opening a link to Telegram and writing bot a message, and the user might try to log in
-// from a computer but have Telegram installed only on the mobile device.
-// Provided text should start with https://t.me/.
-func (s *public) telegramQrCtrl(w http.ResponseWriter, r *http.Request) {
-	text := r.URL.Query().Get("url")
-	if text == "" {
-		rest.SendErrorJSON(w, r, http.StatusBadRequest, fmt.Errorf("missing parameter"), "text parameter is required", rest.ErrInternal)
-		return
-	}
-
-	if !strings.HasPrefix(text, "https://t.me/") {
-		rest.SendErrorJSON(w, r, http.StatusBadRequest, fmt.Errorf("wrong parameter"), "text parameter should start with https://t.me/", rest.ErrInternal)
-		return
-	}
-
-	q, err := qrcode.New(text, qrcode.Medium)
-	if err != nil {
-		rest.SendErrorJSON(w, r, http.StatusInternalServerError, err, "can't generate QR", rest.ErrInternal)
-		return
-	}
-	q.DisableBorder = true
-	png, err := q.PNG(256)
-	if err != nil {
-		rest.SendErrorJSON(w, r, http.StatusInternalServerError, err, "can't generate QR", rest.ErrInternal)
-		return
-	}
-
-	w.Header().Set("Content-Type", "image/png")
-	if _, err = w.Write(png); err != nil { //nolint:gosec // png bytes from go-qrcode, not HTML
-		log.Printf("[WARN] can't render qr, %v", err)
-	}
 }
 
 func (s *public) applyView(comments []store.Comment, view string) []store.Comment {

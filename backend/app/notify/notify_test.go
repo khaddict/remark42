@@ -325,7 +325,3 @@ func (m mockStore) Get(_ store.Locator, id string, _ store.User) (store.Comment,
 func (m mockStore) GetUserEmail(_, userID string) (string, error) {
 	return m.getUserDetail(userID)
 }
-
-func (m mockStore) GetUserTelegram(_, userID string) (string, error) {
-	return m.getUserDetail(userID)
-}

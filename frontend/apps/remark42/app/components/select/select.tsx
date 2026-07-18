@@ -1,8 +1,8 @@
 import clsx from 'clsx';
-import { h, JSX } from 'preact';
-import { useState } from 'preact/hooks';
+import { h } from 'preact';
 
-import { ArrowIcon } from 'components/icons/arrow';
+import { useTheme } from 'hooks/useTheme';
+import { Dropdown } from 'components/dropdown';
 
 import styles from './select.module.css';
 
@@ -11,47 +11,39 @@ type Item = {
   value: string | number | undefined;
 };
 
-type Props = Omit<
-  JSX.HTMLAttributes<HTMLSelectElement>,
-  'className' | 'onFocus' | 'onBlur' | 'selected' | 'label' | 'icon' | 'size'
-> & {
+type Props = {
   size?: 'sm' | 'md';
   items: Item[];
   selected?: Item;
+  title?: string;
+  contentAlign?: 'left' | 'right';
+  onChange(value: Item['value']): void;
 };
 
-export function Select({ items, selected, size = 'md', ...props }: Props) {
-  const [focus, setFocus] = useState(false);
+export function Select({ items, selected, size = 'md', title, contentAlign, onChange }: Props) {
+  const theme = useTheme();
   const selectedItem = selected ?? items[0];
 
-  const iconSize = {
-    sm: 10,
-    md: 12,
-  };
-
   return (
-    <span
-      data-testid="select-root"
-      className={clsx('select', styles.root, size && styles[size], {
-        [styles.rootFocused]: focus,
-        select_focused: focus,
-        [`select_${size}`]: size,
-      })}
+    <Dropdown
+      title={String(selectedItem.label)}
+      buttonTitle={title}
+      theme={theme}
+      contentAlign={contentAlign}
+      titleClass={clsx(styles.trigger, size && styles[size])}
     >
-      {selectedItem.label}
-      <ArrowIcon data-testid="select-arrow" size={iconSize[size]} className={clsx('select-arrow', styles.arrow)} />
-      <select
-        {...props}
-        onFocus={() => setFocus(true)}
-        onBlur={() => setFocus(false)}
-        className={clsx('select-element', styles.select)}
-      >
-        {items.map((i) => (
-          <option key={i.value} value={i.value} selected={selectedItem.value === i.value}>
-            {i.label}
-          </option>
-        ))}
-      </select>
-    </span>
+      {items.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          role="option"
+          aria-selected={item.value === selectedItem.value}
+          className={clsx(styles.option, item.value === selectedItem.value && styles.optionSelected)}
+          onClick={() => onChange(item.value)}
+        >
+          {item.label}
+        </button>
+      ))}
+    </Dropdown>
   );
 }

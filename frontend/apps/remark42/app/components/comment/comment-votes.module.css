@@ -1,12 +1,7 @@
 .root {
   display: flex;
   align-items: center;
-  position: absolute;
-  top: 5px;
-  right: 0;
-  min-width: 72px;
   font-weight: 700;
-  text-align: right;
   line-height: 16px;
   user-select: none;
 }
@@ -41,10 +36,8 @@
 }
 
 .votes {
-  margin: 0 4px;
-  padding: 2px 6px;
+  margin: 0 2px;
   font-weight: 700;
-  border-radius: 3px;
   min-width: 16px;
   text-align: center;
   color: rgb(var(--secondary-darker-text-color));
@@ -52,12 +45,10 @@
 
 .votesNegative {
   color: rgb(var(--color30));
-  background-color: rgba(var(--color30), 0.1);
 }
 
 .votesPositive {
   color: rgb(var(--color12));
-  background-color: rgba(var(--color12), 0.1);
 }
 
 .upVoteIcon {

@@ -3,23 +3,27 @@
   display: inline-flex;
   box-sizing: border-box;
   width: 100%;
-  border: 1px solid;
-  border-color: transparent;
-  padding: 7px 12px;
+  height: 30px;
+  border: 1px solid var(--line-color);
+  padding: 0 14px;
   margin: 0;
   justify-content: center;
   align-items: center;
-  border-radius: 4px;
+  gap: 8px;
+  border-radius: 999px;
   font-family: inherit;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: bold;
   cursor: pointer;
   white-space: nowrap;
-  background-color: rgb(var(--primary-color));
-  color: rgb(var(--white-color));
+  background-color: transparent;
+  color: rgb(var(--secondary-text-color));
+  transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
 
   &:hover {
-    background-color: rgb(var(--primary-brighter-color));
+    color: rgb(var(--primary-color));
+    border-color: rgb(var(--primary-color));
+    background-color: rgba(var(--primary-color), 0.08);
   }
 
   &:focus {
@@ -30,7 +34,7 @@
   &:disabled {
     opacity: 0.6;
     cursor: default;
-    background-color: var(--color9);
+    background-color: transparent;
   }
 }
 
@@ -47,13 +51,15 @@
     position: absolute;
     left: 0;
     content: '';
-    height: 36px;
-    border-left: 1px solid rgba(var(--white-color), 0.2);
+    height: 20px;
+    border-left: 1px solid var(--line-color);
   }
 }
 
 .selected:hover {
-  background-color: rgb(var(--primary-color));
+  color: rgb(var(--primary-color));
+  border-color: rgb(var(--primary-color));
+  background-color: rgba(var(--primary-color), 0.08);
 }
 
 .xs {
@@ -77,12 +83,13 @@
 }
 
 .hollow {
-  color: rgb(var(--primary-color));
+  color: rgb(var(--secondary-text-color));
   background-color: unset;
   text-transform: initial;
   width: auto;
 
   &:hover {
+    color: rgb(var(--primary-color));
     background-color: rgba(var(--primary-color), 0.1);
   }
 }
@@ -91,7 +98,7 @@
   composes: hollow;
   border: 0;
   padding: 2px;
-  font-weight: 600;
+  font-weight: 400;
 
   &:hover {
     background-color: unset;
@@ -105,10 +112,6 @@
 }
 
 :global(.dark) {
-  & .button {
-    border-color: rgba(var(--white-color), 0.1);
-  }
-
   & .transparent {
     border-color: transparent;
     color: inherit;

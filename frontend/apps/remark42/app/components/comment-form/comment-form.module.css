@@ -1,13 +1,9 @@
 .root {
   position: relative;
   display: block;
-  border-style: solid;
-  border-width: 6px 12px 12px 12px;
-  border-radius: 2px;
-}
-
-.simple {
-  border-width: 12px;
+  border: 1px solid var(--color16);
+  border-radius: 14px;
+  overflow: hidden;
 }
 
 .typeReply {
@@ -19,8 +15,11 @@
 }
 
 .controlPanel {
-  height: 30px;
-  background-color: var(--color5);
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--color16);
 }
 
 .fieldWrapper {
@@ -29,7 +28,7 @@
 
 .field {
   /* font-size * line-height * lines * vertical-padding */
-  --height: calc(16px * 1.4 * 4 + 10px * 2);
+  --height: calc(14px * 1.4 * 4 + 10px * 2);
 
   display: block;
   box-sizing: border-box;
@@ -38,17 +37,17 @@
   min-height: var(--height);
   padding: 10px 12px;
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.4;
   border: 0;
+  background: transparent;
   resize: none;
   overflow: hidden;
   backface-visibility: hidden;
   transform: translateZ(0);
 
   &:focus {
-    box-shadow: 0 0 0 2px var(--color47);
-    border-color: var(--color15);
+    box-shadow: inset 0 0 0 2px var(--color47);
     outline: none;
   }
 
@@ -71,16 +70,18 @@
   padding: 10px 12px;
   font-size: 14px;
   line-height: 18px;
+  border-top: 1px solid var(--color16);
 }
 
 .actions {
   display: flex;
   align-items: center;
-  padding-top: 12px;
+  padding: 12px;
   flex-wrap: wrap;
   justify-content: space-between;
   min-height: 30px;
   gap: 12px;
+  border-top: 1px solid var(--color16);
 }
 
 .button {
@@ -88,7 +89,7 @@
   align-self: flex-start;
 
   &:last-child {
-    margin-right: 20px;
+    margin-right: 0;
   }
 }
 
@@ -99,88 +100,74 @@
 
 .previewWrapper {
   overflow: hidden;
+  border-top: 1px solid var(--color16);
 }
 
 .preview {
-  margin-top: 8px;
-  padding: 7px 11px;
+  margin: 0;
+  padding: 10px 12px;
   overflow: hidden;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.2;
-  border: 1px dashed;
-  border-radius: 2px;
 }
 
-.markdown {
-  margin-bottom: 5px;
-  font-size: 12px;
-}
-
-.markdownLink {
-  font-weight: 700;
+.markdownHint {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--color10);
+  font-size: 11px;
+  text-decoration: none;
   white-space: nowrap;
+
+  &:hover {
+    color: var(--color9);
+  }
 }
 
 .themeDark {
-  border-color: var(--color7);
+  border-color: var(--color36);
   background: var(--color8);
 
-  & .actions {
-    background: var(--color7);
+  & .controlPanel {
+    border-bottom-color: var(--color36);
   }
 
   & .error {
-    border-top: 8px solid var(--color7);
     background: var(--color28);
     color: var(--color27);
+    border-top-color: var(--color36);
   }
 
   & .field {
-    background: var(--color8);
-    color: var(--color5);
+    color: var(--color20);
   }
 
   & .preview {
-    border-color: var(--color8);
     background: var(--color8);
     color: var(--color20);
   }
 
-  & .previewWrapper {
-    background: var(--color7);
-  }
-
-  & .controlPanel {
-    background-color: var(--color7);
+  & .previewWrapper,
+  & .actions {
+    border-top-color: var(--color36);
   }
 }
 
 .themeLight {
-  border-color: var(--color5);
+  border-color: var(--color16);
   background: var(--color6);
 
-  & .actions {
-    background: var(--color5);
-  }
-
   & .error {
-    border-top: 8px solid var(--color5);
     background: var(--color26);
     color: var(--color25);
   }
 
   & .field {
-    background: var(--color6);
     color: var(--color0);
   }
 
   & .preview {
-    border-color: var(--color5);
     background: var(--color6);
     color: var(--color7);
-  }
-
-  & .previewWrapper {
-    background: var(--color5);
   }
 }

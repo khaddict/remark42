@@ -25,14 +25,11 @@ import (
 
 // Migrator rest with import and export controllers
 type Migrator struct {
-	Cache             LoadingCache
-	NativeImporter    migrator.Importer
-	DisqusImporter    migrator.Importer
-	WordPressImporter migrator.Importer
-	CommentoImporter  migrator.Importer
-	NativeExporter    migrator.Exporter
-	URLMapperMaker    migrator.MapperMaker
-	KeyStore          KeyStore
+	Cache          LoadingCache
+	NativeImporter migrator.Importer
+	NativeExporter migrator.Exporter
+	URLMapperMaker migrator.MapperMaker
+	KeyStore       KeyStore
 
 	busy map[string]bool
 	lock sync.Mutex
@@ -43,7 +40,7 @@ type KeyStore interface {
 	Key(siteID string) (key string, err error)
 }
 
-// POST /import?secret=key&site=site-id&provider=disqus|remark|wordpress
+// POST /import?secret=key&site=site-id
 // imports comments from post body.
 func (m *Migrator) importCtrl(w http.ResponseWriter, r *http.Request) {
 	siteID := r.URL.Query().Get("site")
@@ -65,7 +62,7 @@ func (m *Migrator) importCtrl(w http.ResponseWriter, r *http.Request) {
 	_ = R.EncodeJSON(w, http.StatusAccepted, R.JSON{"status": "import request accepted"})
 }
 
-// POST /import/form?secret=key&site=site-id&provider=disqus|remark|wordpress
+// POST /import/form?secret=key&site=site-id
 // imports comments from form body.
 func (m *Migrator) importFormCtrl(w http.ResponseWriter, r *http.Request) {
 	siteID := r.URL.Query().Get("site")
@@ -182,9 +179,6 @@ func (m *Migrator) exportCtrl(w http.ResponseWriter, r *http.Request) {
 
 // exportErrStatus maps an export failure to an HTTP status and error code: an unknown
 // site is a client error (400), anything else is treated as internal (500).
-// The bolt store returns the engine.ErrSiteNotFound sentinel; the rpc store loses typed
-// errors over jrpc, so the "not found" message is matched as a fallback (export only ever
-// hits a site-level lookup, so a "not found" here can only mean the site).
 func exportErrStatus(err error) (status, errCode int) {
 	if errors.Is(err, engine.ErrSiteNotFound) || strings.Contains(err.Error(), "not found") {
 		return http.StatusBadRequest, rest.ErrSiteNotFound
@@ -258,17 +252,7 @@ func (m *Migrator) runImport(siteID, provider, tmpfile string) {
 		}
 	}()
 
-	var importer migrator.Importer
-	switch provider {
-	case "disqus":
-		importer = m.DisqusImporter
-	case "wordpress":
-		importer = m.WordPressImporter
-	case "commento":
-		importer = m.CommentoImporter
-	default:
-		importer = m.NativeImporter
-	}
+	importer := m.NativeImporter
 	log.Printf("[DEBUG] import request for site=%s, provider=%s", siteID, provider)
 
 	fh, err := os.Open(tmpfile) // nolint

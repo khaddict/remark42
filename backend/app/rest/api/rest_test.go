@@ -2,12 +2,10 @@ package api
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -217,98 +215,6 @@ func TestRest_filterComments(t *testing.T) {
 	assert.Equal(t, 2, len(r), "one comment filtered")
 }
 
-func TestRest_RunStaticSSLMode(t *testing.T) {
-	sslPort := chooseRandomUnusedPort()
-	srv := Rest{
-		Authenticator: auth.NewService(auth.Opts{
-			AvatarStore:       avatar.NewLocalFS("/tmp"),
-			AvatarResizeLimit: 300,
-		}),
-
-		ImageProxy: &proxy.Image{},
-		SSLConfig: SSLConfig{
-			SSLMode: Static,
-			Port:    sslPort,
-			Key:     "../../cmd/testdata/key.pem",
-			Cert:    "../../cmd/testdata/cert.pem",
-		},
-		RemarkURL: fmt.Sprintf("https://localhost:%d", sslPort),
-	}
-
-	port := chooseRandomUnusedPort()
-	go func() {
-		srv.Run("", port)
-	}()
-
-	waitForHTTPSServerStart(sslPort)
-
-	client := http.Client{
-		// prevent http redirect
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-
-		// allow self-signed certificate
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-	defer client.CloseIdleConnections()
-
-	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/blah?param=1", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
-	assert.Equal(t, fmt.Sprintf("https://localhost:%d/blah?param=1", sslPort), resp.Header.Get("Location"))
-
-	resp, err = client.Get(fmt.Sprintf("https://localhost:%d/ping", sslPort))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.Equal(t, "pong", string(body))
-
-	srv.Shutdown()
-}
-
-func TestRest_RunAutocertModeHTTPOnly(t *testing.T) {
-	sslPort := chooseRandomUnusedPort()
-	srv := Rest{
-		Authenticator: &auth.Service{},
-		ImageProxy:    &proxy.Image{},
-		SSLConfig: SSLConfig{
-			SSLMode: Auto,
-			Port:    sslPort,
-		},
-		RemarkURL: fmt.Sprintf("https://localhost:%d", sslPort),
-	}
-
-	port := chooseRandomUnusedPort()
-	go func() {
-		// can't check https server locally, just only http server
-		srv.Run("", port)
-	}()
-
-	waitForHTTPSServerStart(sslPort)
-
-	client := http.Client{
-		// prevent http redirect
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-	defer client.CloseIdleConnections()
-
-	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/blah?param=1", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
-	assert.Equal(t, fmt.Sprintf("https://localhost:%d/blah?param=1", sslPort), resp.Header.Get("Location"))
-
-	srv.Shutdown()
-}
-
 func Test_URLKey(t *testing.T) {
 	tbl := []struct {
 		url  string
@@ -470,14 +376,11 @@ func startupT(t *testing.T, srvHook ...func(srv *Rest)) (ts *httptest.Server, sr
 		ReadOnlyAge:      10,
 		CommentFormatter: store.NewCommentFormatter(&proxy.Image{}),
 		Migrator: &Migrator{
-			DisqusImporter:    &migrator.Disqus{DataStore: dataStore},
-			WordPressImporter: &migrator.WordPress{DataStore: dataStore},
-			CommentoImporter:  &migrator.Commento{DataStore: dataStore},
-			NativeImporter:    &migrator.Native{DataStore: dataStore},
-			NativeExporter:    &migrator.Native{DataStore: dataStore},
-			URLMapperMaker:    migrator.NewURLMapper,
-			Cache:             memCache,
-			KeyStore:          astore,
+			NativeImporter: &migrator.Native{DataStore: dataStore},
+			NativeExporter: &migrator.Native{DataStore: dataStore},
+			URLMapperMaker: migrator.NewURLMapper,
+			Cache:          memCache,
+			KeyStore:       astore,
 		},
 		NotifyService:    notify.NopService,
 		EmojiEnabled:     true,
@@ -637,29 +540,6 @@ func requireAdminOnly(t *testing.T, req *http.Request) {
 	require.NoError(t, err)
 	require.NoError(t, resp.Body.Close())
 	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-}
-
-func chooseRandomUnusedPort() (port int) {
-	for range 10 {
-		port = 40000 + int(rand.Int31n(10000))
-		if ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port)); err == nil {
-			_ = ln.Close()
-			break
-		}
-	}
-	return port
-}
-
-func waitForHTTPSServerStart(port int) {
-	// wait for up to 3 seconds for HTTPS server to start
-	for range 300 {
-		time.Sleep(time.Millisecond * 10)
-		conn, _ := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), time.Millisecond*10)
-		if conn != nil {
-			_ = conn.Close()
-			break
-		}
-	}
 }
 
 func TestMain(m *testing.M) {

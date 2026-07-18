@@ -13,6 +13,9 @@ import { isUserAnonymous } from 'utils/isUserAnonymous';
 import { Props as CommentFormProps } from 'components/comment-form';
 import { Avatar } from 'components/avatar';
 import { VerificationIcon } from 'components/icons/verification';
+import { ClockIcon } from 'components/icons/clock';
+import { ReplyIcon } from 'components/icons/reply';
+import { CrossIcon } from 'components/icons/cross';
 import { getPreview, uploadImage } from 'common/api';
 import { postMessageToParent } from 'utils/post-message';
 import { getBlockingDurations } from './getBlockingDurations';
@@ -214,14 +217,6 @@ export class Comment extends Component<CommentProps, State> {
     }
   };
 
-  hideUser = () => {
-    const hideUserComment = this.props.intl.formatMessage(messages.hideUserComments, {
-      userName: this.props.data.user.name,
-    });
-    if (!window.confirm(hideUserComment)) return;
-    this.props.hideUser!(this.props.data.user);
-  };
-
   addComment = async (text: string, title: string, pid?: CommentType['id']) => {
     await this.props.addComment!(text, title, pid);
 
@@ -232,25 +227,6 @@ export class Comment extends Component<CommentProps, State> {
     await this.props.updateComment!(id, text);
 
     this.props.setReplyEditState!({ id: this.props.data.id, state: CommentMode.None });
-  };
-
-  scrollToParent = (evt: Event) => {
-    const { pid } = this.props.data;
-    const parentCommentNode = document.getElementById(`${COMMENT_NODE_CLASSNAME_PREFIX}${pid}`);
-
-    evt.preventDefault();
-
-    if (!parentCommentNode) {
-      return;
-    }
-
-    const top = parentCommentNode.getBoundingClientRect().top;
-
-    if (postMessageToParent({ scrollTo: top })) {
-      return;
-    }
-
-    parentCommentNode.scrollIntoView();
   };
 
   get isVotesDisabled(): boolean {
@@ -381,7 +357,6 @@ export class Comment extends Component<CommentProps, State> {
         />
       );
     }
-    const goToParentMessage = intl.formatMessage(messages.goToParent);
 
     return (
       <article className={rootClassName} id={props.disabled ? undefined : `${COMMENT_NODE_CLASSNAME_PREFIX}${o.id}`}>
@@ -430,45 +405,49 @@ export class Comment extends Component<CommentProps, State> {
             )}
           </div>
 
-          <a href={`${o.locator.url}#${COMMENT_NODE_CLASSNAME_PREFIX}${o.id}`} className={styles.time}>
-            {getLocalDatetime(this.props.intl, o.time)}
+          <a
+            href={`${o.locator.url}#${COMMENT_NODE_CLASSNAME_PREFIX}${o.id}`}
+            className={styles.time}
+            aria-label={getLocalDatetime(this.props.intl, o.time)}
+          >
+            <ClockIcon className={styles.timeIcon} />
+            <span className={styles.timeTooltip} aria-hidden="true">
+              {getLocalDatetime(this.props.intl, o.time)}
+            </span>
           </a>
 
-          {!!props.level && props.level > 0 && props.view === 'main' && (
-            <a
-              className={styles.threadStarterAnchor}
-              href={`${o.locator.url}#${COMMENT_NODE_CLASSNAME_PREFIX}${o.pid}`}
-              title={goToParentMessage}
-              onClick={(e) => this.scrollToParent(e)}
-            >
-              <svg width="7" height="11" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7 11" aria-hidden>
-                <path
-                  fill="currentColor"
-                  d="M.815 5.905L2.915 4v7H4.08V4l2.105 1.905.815-.74-3.5-3.17L0 5.165l.815.74zM0 1.045h7V0H0v1.045z"
-                />
-              </svg>
-            </a>
-          )}
+          <div className={clsx(styles.actions, isReplying && styles.actionsVisible)}>
+            {(!props.collapsed || !this.props.data.delete) && props.view !== 'pinned' && !props.post_info?.read_only && (
+              <button
+                type="button"
+                className={styles.replyButton}
+                onClick={this.toggleReplying}
+                title={intl.formatMessage(isReplying ? messages.cancel : messages.reply)}
+              >
+                {isReplying ? <CrossIcon size={13} /> : <ReplyIcon />}
+              </button>
+            )}
+            {this.props.view !== 'pinned' && (
+              <CommentVotes
+                id={this.props.data.id}
+                vote={props.data.vote}
+                votes={props.data.score}
+                controversy={props.data.controversy}
+                disabled={this.isVotesDisabled}
+              />
+            )}
+          </div>
 
           {props.isUserBanned && props.view !== 'user' && (
-            <span className={styles.status}>
-              <FormattedMessage id="comment.blocked-user" defaultMessage="Blocked" />
+            <span className={clsx(styles.status, styles.statusBlocked)}>
+              <FormattedMessage id="comment.blocked-user" defaultMessage="blocked" />
             </span>
           )}
 
           {isAdmin && !props.isUserBanned && props.data.delete && (
-            <span className={styles.status}>
-              <FormattedMessage id="comment.deleted-user" defaultMessage="Deleted" />
+            <span className={clsx(styles.status, styles.statusDeleted)}>
+              <FormattedMessage id="comment.deleted-user" defaultMessage="deleted" />
             </span>
-          )}
-          {this.props.view !== 'pinned' && (
-            <CommentVotes
-              id={this.props.data.id}
-              vote={props.data.vote}
-              votes={props.data.score}
-              controversy={props.data.controversy}
-              disabled={this.isVotesDisabled}
-            />
           )}
         </div>
         <div className={styles.body}>
@@ -488,14 +467,11 @@ export class Comment extends Component<CommentProps, State> {
               pinned={props.data.pin}
               copied={state.isCopied}
               editing={isEditing}
-              replying={isReplying}
               editable={
                 state.editDeadline !== undefined &&
                 (props.repliesCount === 0 || (isAdmin && StaticStore.config.admin_edit))
               }
               editDeadline={state.editDeadline}
-              readOnly={props.post_info?.read_only}
-              onToggleReplying={this.toggleReplying}
               onDisableEditing={() => this.setState({ editDeadline: undefined })}
               currentUser={isCurrentUser}
               bannedUser={props.isUserBanned}
@@ -503,7 +479,6 @@ export class Comment extends Component<CommentProps, State> {
               onTogglePin={this.togglePin}
               onToggleEditing={this.toggleEditing}
               onDelete={this.deleteComment}
-              onHideUser={this.hideUser}
               onBlockUser={this.blockUser}
               onUnblockUser={this.unblockUser}
             />
@@ -567,13 +542,17 @@ function getLocalDatetime(intl: IntlShape, date: Date) {
 }
 
 const messages = defineMessages({
+  reply: {
+    id: 'comment.reply',
+    defaultMessage: 'reply',
+  },
+  cancel: {
+    id: 'comment.cancel',
+    defaultMessage: 'cancel',
+  },
   deleteMessage: {
     id: 'comment.delete-message',
     defaultMessage: 'Do you want to delete this comment?',
-  },
-  hideUserComments: {
-    id: 'comment.hide-user-comment',
-    defaultMessage: 'Do you want to hide comments of {userName}?',
   },
   pinComment: {
     id: 'comment.pin-comment',
@@ -615,10 +594,6 @@ const messages = defineMessages({
   unverifiedUser: {
     id: 'comment.unverified-user',
     defaultMessage: 'Unverified user',
-  },
-  goToParent: {
-    id: 'comment.go-to-parent',
-    defaultMessage: 'Go to parent comment',
   },
   expiredTime: {
     id: 'comment.expired-time',

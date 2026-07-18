@@ -25,7 +25,7 @@
   }
 }
 
-.additionalActions::before {
+.additionalActions:not(:empty)::before {
   content: '•';
   color: rgb(var(--secondary-text-color));
   margin-right: 0.5em;

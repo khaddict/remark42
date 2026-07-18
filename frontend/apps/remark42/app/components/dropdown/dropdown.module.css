@@ -13,23 +13,33 @@
   transform: translate(-0.5em, 5px);
   min-width: 120px;
   max-width: 260px;
-  border: 2px solid var(--color15);
-  border-radius: 3px;
-  padding: 0 0 5px;
+  border: 1px solid;
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 12px 32px var(--color46);
+  overflow: hidden;
+}
+
+.contentAlignRight {
+  left: auto;
+  right: 0;
+  transform: translateY(5px);
 }
 
 .items {
-  padding: 5px 0;
-
-  &:last-child {
-    padding-bottom: 0;
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .title {
-  &::after {
-    content: '\25BE';
-    margin-left: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  & svg {
+    width: 10px;
+    height: 10px;
   }
 }
 
@@ -39,8 +49,10 @@
 
 .themeDark > .content {
   background-color: var(--color8);
+  border-color: var(--color36);
 }
 
 .themeLight > .content {
   background-color: var(--color6);
+  border-color: var(--color16);
 }

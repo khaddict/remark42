@@ -11,15 +11,11 @@ function getProps(): Props {
     currentUser: false,
     copied: false,
     bannedUser: false,
-    readOnly: false,
     editing: false,
-    replying: false,
     onCopy: jest.fn(),
     onDelete: jest.fn(),
     onToggleEditing: jest.fn(),
     onTogglePin: jest.fn(),
-    onToggleReplying: jest.fn(),
-    onHideUser: jest.fn(),
     onBlockUser: jest.fn(),
     onUnblockUser: jest.fn(),
     onDisableEditing: jest.fn(),
@@ -37,36 +33,6 @@ describe('<CommentActions/>', () => {
     jest.resetAllMocks();
   });
 
-  it('should render "Reply"', () => {
-    render(<CommentActions {...props} />);
-    expect(screen.getByText('Reply')).toBeVisible();
-  });
-
-  it('should not render "Reply" in read only mode', () => {
-    props.readOnly = true;
-    render(<CommentActions {...props} />);
-    expect(screen.queryByText('Reply')).not.toBeInTheDocument();
-  });
-
-  it('should not render "Cancel" instead "Reply" in replying mode', () => {
-    props.replying = true;
-    render(<CommentActions {...props} />);
-    expect(screen.queryByText('Reply')).not.toBeInTheDocument();
-    expect(screen.getByText('Cancel')).toBeInTheDocument();
-  });
-
-  it('should render "Hide" on comments not from currentUser', () => {
-    props.currentUser = false;
-    render(<CommentActions {...props} />);
-    expect(screen.getByText('Hide')).toBeVisible();
-  });
-
-  it('should not render "Hide" on comments not from currentUser', () => {
-    props.currentUser = true;
-    render(<CommentActions {...props} />);
-    expect(screen.queryByText('Hide')).not.toBeInTheDocument();
-  });
-
   it('should render "Edit" and timer when editing is available', async () => {
     Object.assign(props, { editable: true, editDeadline: Date.now() + 300 * 1000 });
     render(<CommentActions {...props} />);
@@ -77,7 +43,7 @@ describe('<CommentActions/>', () => {
   it('should render "Cancel" instead "Edit" in editing mode', async () => {
     Object.assign(props, { editable: true, editing: true, editDeadline: Date.now() + 300 * 1000 });
     render(<CommentActions {...props} />);
-    expect(screen.getByText('Cancel')).toBeInTheDocument();
+    expect(screen.getByText('cancel')).toBeInTheDocument();
   });
 
   it.each([
@@ -86,7 +52,7 @@ describe('<CommentActions/>', () => {
   ] as Partial<Props>[][])('should not render "Edit" when editing is not available', (override) => {
     Object.assign(props, override);
     render(<CommentActions {...props} />);
-    expect(screen.getByText('Hide')).toBeInTheDocument();
+    expect(screen.queryByText('Edit')).not.toBeInTheDocument();
   });
 
   it('should render "Delete" for current user comments when editing is available', () => {
@@ -145,11 +111,10 @@ describe('<CommentActions/>', () => {
     it('should render admin actions in right order', () => {
       props.admin = true;
       render(<CommentActions {...props} />);
-      expect(screen.getByTestId('comment-actions-additional').children[0]).toHaveTextContent('Hide');
-      expect(screen.getByTestId('comment-actions-additional').children[1]).toHaveTextContent('Copy');
-      expect(screen.getByTestId('comment-actions-additional').children[2]).toHaveTextContent('Pin');
-      expect(screen.getByTestId('comment-actions-additional').children[3]).toHaveTextContent('Block');
-      expect(screen.getByTestId('comment-actions-additional').children[4]).toHaveTextContent('Delete');
+      expect(screen.getByTestId('comment-actions-additional').children[0]).toHaveTextContent('Copy');
+      expect(screen.getByTestId('comment-actions-additional').children[1]).toHaveTextContent('Pin');
+      expect(screen.getByTestId('comment-actions-additional').children[2]).toHaveTextContent('Block');
+      expect(screen.getByTestId('comment-actions-additional').children[3]).toHaveTextContent('Delete');
     });
 
     it('calls `onToggleEditing` when edit button is pressed', () => {

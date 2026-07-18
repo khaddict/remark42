@@ -1,6 +1,3 @@
-# Local Claude code settings
-.claude/settings.local.json
-
 # Binaries for programs and plugins
 *.exe
 *.exe~

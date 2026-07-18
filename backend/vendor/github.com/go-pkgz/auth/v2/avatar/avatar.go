@@ -355,7 +355,6 @@ func setAvatarDefenseHeaders(w http.ResponseWriter) {
 
 // GenerateAvatar for give user with identicon
 func GenerateAvatar(user string) ([]byte, error) {
-
 	iconGen, err := identicon.New("pkgz/auth", 5, 5)
 	if err != nil {
 		return nil, fmt.Errorf("can't create identicon service: %w", err)

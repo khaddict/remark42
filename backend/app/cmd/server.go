@@ -2,41 +2,31 @@ package cmd
 
 import (
 	"context"
-	"crypto/sha1" //nolint:gosec // used only for stable ID hashing, not for security
 	"embed"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
-	"path"
-	"regexp"
 	"slices"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/go-pkgz/jrpc"
-	"github.com/go-pkgz/lcw/v2/eventbus"
 	log "github.com/go-pkgz/lgr"
 	ntf "github.com/go-pkgz/notify"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/kyokomi/emoji/v2"
 	bolt "go.etcd.io/bbolt"
-	"golang.org/x/oauth2"
 
 	"github.com/go-pkgz/auth/v2"
 	"github.com/go-pkgz/auth/v2/avatar"
-	"github.com/go-pkgz/auth/v2/provider"
-	"github.com/go-pkgz/auth/v2/provider/sender"
 	"github.com/go-pkgz/auth/v2/token"
 	cache "github.com/go-pkgz/lcw/v2"
 
 	"github.com/umputun/remark42/backend/app/migrator"
 	"github.com/umputun/remark42/backend/app/notify"
-	"github.com/umputun/remark42/backend/app/providers"
 	"github.com/umputun/remark42/backend/app/rest/api"
 	"github.com/umputun/remark42/backend/app/rest/proxy"
 	"github.com/umputun/remark42/backend/app/safehttp"
@@ -45,7 +35,6 @@ import (
 	"github.com/umputun/remark42/backend/app/store/engine"
 	"github.com/umputun/remark42/backend/app/store/image"
 	"github.com/umputun/remark42/backend/app/store/service"
-	"github.com/umputun/remark42/backend/app/templates"
 )
 
 //go:embed web
@@ -59,9 +48,7 @@ type ServerCommand struct {
 	Admin      AdminGroup      `group:"admin" namespace:"admin" env-namespace:"ADMIN"`
 	Notify     NotifyGroup     `group:"notify" namespace:"notify" env-namespace:"NOTIFY"`
 	SMTP       SMTPGroup       `group:"smtp" namespace:"smtp" env-namespace:"SMTP"`
-	Telegram   TelegramGroup   `group:"telegram" namespace:"telegram" env-namespace:"TELEGRAM"`
 	Image      ImageGroup      `group:"image" namespace:"image" env-namespace:"IMAGE"`
-	SSL        SSLGroup        `group:"ssl" namespace:"ssl" env-namespace:"SSL"`
 	ImageProxy ImageProxyGroup `group:"image-proxy" namespace:"image-proxy" env-namespace:"IMAGE_PROXY"`
 
 	Sites                      []string      `long:"site" env:"SITE" default:"remark" description:"site names" env-delim:","`
@@ -105,32 +92,7 @@ type ServerCommand struct {
 		SendJWTHeader bool   `long:"send-jwt-header" env:"SEND_JWT_HEADER" description:"send JWT as a header instead of server-set cookie; with this enabled, frontend stores the JWT in a client-side cookie (note: increases vulnerability to XSS attacks)"`
 		SameSite      string `long:"same-site" env:"SAME_SITE" description:"set same site policy for cookies" choice:"default" choice:"none" choice:"lax" choice:"strict" default:"default"` // nolint
 
-		Apple     AppleGroup         `group:"apple" namespace:"apple" env-namespace:"APPLE" description:"Apple OAuth"`
-		Google    AuthGroup          `group:"google" namespace:"google" env-namespace:"GOOGLE" description:"Google OAuth"`
-		Github    AuthGroup          `group:"github" namespace:"github" env-namespace:"GITHUB" description:"Github OAuth"`
-		Facebook  AuthGroup          `group:"facebook" namespace:"facebook" env-namespace:"FACEBOOK" description:"Facebook OAuth"`
-		Microsoft MicrosoftAuthGroup `group:"microsoft" namespace:"microsoft" env-namespace:"MICROSOFT" description:"Microsoft OAuth"`
-		Yandex    AuthGroup          `group:"yandex" namespace:"yandex" env-namespace:"YANDEX" description:"Yandex OAuth"`
-		Twitter   AuthGroup          `group:"twitter" namespace:"twitter" env-namespace:"TWITTER" description:"[deprecated, doesn't work] Twitter OAuth"`
-		Patreon   AuthGroup          `group:"patreon" namespace:"patreon" env-namespace:"PATREON" description:"Patreon OAuth"`
-		Discord   AuthGroup          `group:"discord" namespace:"discord" env-namespace:"DISCORD" description:"Discord OAuth"`
-		Custom    CustomAuthGroup    `group:"custom" namespace:"custom" env-namespace:"CUSTOM" description:"Custom OAuth2 provider"`
-		Telegram  bool               `long:"telegram" env:"TELEGRAM" description:"Enable Telegram auth (using token from telegram.token)"`
-		Dev       bool               `long:"dev" env:"DEV" description:"enable dev (local) oauth2"`
-		Anonymous bool               `long:"anon" env:"ANON" description:"enable anonymous login"`
-		Email     struct {
-			Enable       bool          `long:"enable" env:"ENABLE" description:"enable auth via email"`
-			From         string        `long:"from" env:"FROM" description:"from email address"`
-			Subject      string        `long:"subj" env:"SUBJ" default:"remark42 confirmation" description:"email's subject"`
-			ContentType  string        `long:"content-type" env:"CONTENT_TYPE" default:"text/html" description:"content type"`
-			Host         string        `long:"host" env:"HOST" description:"[deprecated, use --smtp.host] SMTP host"`
-			Port         int           `long:"port" env:"PORT" description:"[deprecated, use --smtp.port] SMTP port"`
-			SMTPPassword string        `long:"passwd" env:"PASSWD" description:"[deprecated, use --smtp.password] SMTP password"`
-			SMTPUserName string        `long:"user" env:"USER" description:"[deprecated, use --smtp.username] SMTP user name"`
-			TLS          bool          `long:"tls" env:"TLS" description:"[deprecated, use --smtp.tls] enable TLS"`
-			TimeOut      time.Duration `long:"timeout" env:"TIMEOUT" default:"10s" description:"[deprecated, use --smtp.timeout] SMTP TCP connection timeout"`
-			MsgTemplate  string        `long:"template" env:"TEMPLATE" description:"[deprecated] message template file" default:"email_confirmation_login.html.tmpl"`
-		} `group:"email" namespace:"email" env-namespace:"EMAIL"`
+		Github AuthGroup `group:"github" namespace:"github" env-namespace:"GITHUB" description:"Github OAuth"`
 	} `group:"auth" namespace:"auth" env-namespace:"AUTH"`
 
 	CommonOpts
@@ -145,55 +107,24 @@ type ImageProxyGroup struct {
 	CacheExternal bool `long:"cache-external" env:"CACHE_EXTERNAL" description:"enable caching for external images"`
 }
 
-// AppleGroup defines options for Apple auth params
-type AppleGroup struct {
-	CID                string `long:"cid" env:"CID" description:"Apple client ID (App ID or Services ID)"`
-	TID                string `long:"tid" env:"TID" description:"Apple service ID"`
-	KID                string `long:"kid" env:"KID" description:"Private key ID"`
-	PrivateKeyFilePath string `long:"private-key-filepath" env:"PRIVATE_KEY_FILEPATH" description:"Private key file location" default:"/srv/var/apple.p8"`
-}
-
 // AuthGroup defines options group for auth params
 type AuthGroup struct {
 	CID  string `long:"cid" env:"CID" description:"OAuth client ID"`
 	CSEC string `long:"csec" env:"CSEC" description:"OAuth client secret"`
 }
 
-// MicrosoftAuthGroup defines options group for Microsoft auth params
-type MicrosoftAuthGroup struct {
-	CID    string `long:"cid" env:"CID" description:"OAuth client ID"`
-	CSEC   string `long:"csec" env:"CSEC" description:"OAuth client secret"`
-	Tenant string `long:"tenant" env:"TENANT" description:"Azure AD tenant ID, domain, or 'common' (default)" default:"common"`
-}
-
-// CustomAuthGroup defines options group for custom OAuth2 provider params
-type CustomAuthGroup struct {
-	Name         string   `long:"name" env:"NAME" description:"custom provider name used in auth route"`
-	CID          string   `long:"cid" env:"CID" description:"OAuth client ID"`
-	CSEC         string   `long:"csec" env:"CSEC" description:"OAuth client secret"`
-	AuthURL      string   `long:"auth-url" env:"AUTH_URL" description:"OAuth authorization endpoint"`
-	TokenURL     string   `long:"token-url" env:"TOKEN_URL" description:"OAuth token endpoint"`
-	InfoURL      string   `long:"info-url" env:"INFO_URL" description:"OAuth user info endpoint"`
-	Scopes       []string `long:"scopes" env:"SCOPES" env-delim:"," description:"OAuth scopes"`
-	IDField      string   `long:"id-field" env:"ID_FIELD" default:"sub" description:"user info field used as unique id"`
-	NameField    string   `long:"name-field" env:"NAME_FIELD" default:"name" description:"user info field used as display name"`
-	PictureField string   `long:"picture-field" env:"PICTURE_FIELD" default:"picture" description:"user info field used as avatar url"`
-	EmailField   string   `long:"email-field" env:"EMAIL_FIELD" default:"email" description:"user info field used as email"`
-}
-
 // StoreGroup defines options group for store params
 type StoreGroup struct {
-	Type string `long:"type" env:"TYPE" description:"type of storage" choice:"bolt" choice:"rpc" default:"bolt"` // nolint
+	Type string `long:"type" env:"TYPE" description:"type of storage" choice:"bolt" default:"bolt"` // nolint
 	Bolt struct {
 		Path    string        `long:"path" env:"PATH" default:"./var" description:"parent directory for the bolt files"`
 		Timeout time.Duration `long:"timeout" env:"TIMEOUT" default:"30s" description:"bolt timeout"`
 	} `group:"bolt" namespace:"bolt" env-namespace:"BOLT"`
-	RPC RPCGroup `group:"rpc" namespace:"rpc" env-namespace:"RPC"`
 }
 
 // ImageGroup defines options group for store pictures
 type ImageGroup struct {
-	Type string `long:"type" env:"TYPE" description:"type of storage" choice:"fs" choice:"bolt" choice:"rpc" default:"fs"` // nolint
+	Type string `long:"type" env:"TYPE" description:"type of storage" choice:"fs" choice:"bolt" default:"fs"` // nolint
 	FS   struct {
 		Path       string `long:"path" env:"PATH" default:"./var/pictures" description:"images location"`
 		Staging    string `long:"staging" env:"STAGING" default:"./var/pictures.staging" description:"staging location"`
@@ -202,30 +133,25 @@ type ImageGroup struct {
 	Bolt struct {
 		File string `long:"file" env:"FILE" default:"./var/pictures.db" description:"images bolt file location"`
 	} `group:"bolt" namespace:"bolt" env-namespace:"BOLT"`
-	MaxSize      int      `long:"max-size" env:"MAX_SIZE" default:"5000000" description:"max size of image file"`
-	ResizeWidth  int      `long:"resize-width" env:"RESIZE_WIDTH" default:"2400" description:"width of a resized image"`
-	ResizeHeight int      `long:"resize-height" env:"RESIZE_HEIGHT" default:"900" description:"height of a resized image"`
-	RPC          RPCGroup `group:"rpc" namespace:"rpc" env-namespace:"RPC"`
+	MaxSize      int `long:"max-size" env:"MAX_SIZE" default:"5000000" description:"max size of image file"`
+	ResizeWidth  int `long:"resize-width" env:"RESIZE_WIDTH" default:"2400" description:"width of a resized image"`
+	ResizeHeight int `long:"resize-height" env:"RESIZE_HEIGHT" default:"900" description:"height of a resized image"`
 }
 
 // AvatarGroup defines options group for avatar params
 type AvatarGroup struct {
-	Type string `long:"type" env:"TYPE" description:"type of avatar storage" choice:"fs" choice:"bolt" choice:"uri" default:"fs"` //nolint
+	Type string `long:"type" env:"TYPE" description:"type of avatar storage" choice:"fs" choice:"uri" default:"fs"` //nolint
 	FS   struct {
 		Path string `long:"path" env:"PATH" default:"./var/avatars" description:"avatars location"`
 	} `group:"fs" namespace:"fs" env-namespace:"FS"`
-	Bolt struct {
-		File string `long:"file" env:"FILE" default:"./var/avatars.db" description:"avatars bolt file location"`
-	} `group:"bolt" namespace:"bolt" env-namespace:"BOLT"`
 	URI    string `long:"uri" env:"URI" default:"./var/avatars" description:"avatars store URI"`
 	RszLmt int    `long:"rsz-lmt" env:"RESIZE" default:"0" description:"max image size for resizing avatars on save"`
 }
 
 // CacheGroup defines options group for cache params
 type CacheGroup struct {
-	Type      string `long:"type" env:"TYPE" description:"type of cache" choice:"redis_pub_sub" choice:"mem" choice:"none" default:"mem"` // nolint
-	RedisAddr string `long:"redis_addr" env:"REDIS_ADDR" default:"127.0.0.1:6379" description:"address of Redis PubSub instance, turn redis_pub_sub cache on for distributed cache"`
-	Max       struct {
+	Type string `long:"type" env:"TYPE" description:"type of cache" choice:"mem" choice:"none" default:"mem"` // nolint
+	Max  struct {
 		Items int   `long:"items" env:"ITEMS" default:"1000" description:"max cached items"`
 		Value int   `long:"value" env:"VALUE" default:"65536" description:"max size of the cached value"`
 		Size  int64 `long:"size" env:"SIZE" default:"50000000" description:"max size of total cache"`
@@ -234,18 +160,11 @@ type CacheGroup struct {
 
 // AdminGroup defines options group for admin params
 type AdminGroup struct {
-	Type   string `long:"type" env:"TYPE" description:"type of admin store" choice:"shared" choice:"rpc" default:"shared"` //nolint
+	Type   string `long:"type" env:"TYPE" description:"type of admin store" choice:"shared" default:"shared"` //nolint
 	Shared struct {
 		Admins []string `long:"id" env:"ID" description:"admin(s) ids" env-delim:","`
 		Email  []string `long:"email" env:"EMAIL" description:"admin emails" env-delim:","`
 	} `group:"shared" namespace:"shared" env-namespace:"SHARED"`
-	RPC AdminRPCGroup `group:"rpc" namespace:"rpc" env-namespace:"RPC"`
-}
-
-// TelegramGroup defines token for Telegram used in notify and auth modules
-type TelegramGroup struct {
-	Token   string        `long:"token" env:"TOKEN" description:"telegram token (used for auth and telegram notifications)"`
-	Timeout time.Duration `long:"timeout" env:"TIMEOUT" default:"5s" description:"telegram timeout"`
 }
 
 // SMTPGroup defines options for SMTP server connection, used in auth and notify modules
@@ -263,55 +182,15 @@ type SMTPGroup struct {
 
 // NotifyGroup defines options for notification
 type NotifyGroup struct {
-	Type      []string `long:"type" env:"TYPE" description:"[deprecated, use user and admin types instead] types of notifications" choice:"none" choice:"telegram" choice:"email" choice:"slack" default:"none" env-delim:","` //nolint
-	Users     []string `long:"users" env:"USERS" description:"types of user notifications" choice:"none" choice:"email" choice:"telegram" default:"none" env-delim:","`                                                        //nolint
-	Admins    []string `long:"admins" env:"ADMINS" description:"types of admin notifications" choice:"none" choice:"telegram" choice:"email" choice:"slack" choice:"webhook" default:"none" env-delim:","`                     //nolint
+	Type      []string `long:"type" env:"TYPE" description:"[deprecated, use user and admin types instead] types of notifications" choice:"none" choice:"email" default:"none" env-delim:","` //nolint
+	Users     []string `long:"users" env:"USERS" description:"types of user notifications" choice:"none" choice:"email" default:"none" env-delim:","`                                        //nolint
+	Admins    []string `long:"admins" env:"ADMINS" description:"types of admin notifications" choice:"none" choice:"email" default:"none" env-delim:","`                                     //nolint
 	QueueSize int      `long:"queue" env:"QUEUE" description:"size of notification queue" default:"100"`
-	Telegram  struct {
-		Channel string        `long:"chan" env:"CHAN" description:"the ID of telegram channel for admin notifications"`
-		API     string        `long:"api" env:"API" default:"https://api.telegram.org/bot" description:"[deprecated, not used] telegram api prefix"`
-		Token   string        `long:"token" env:"TOKEN" description:"[deprecated, use --telegram.token] telegram token"`
-		Timeout time.Duration `long:"timeout" env:"TIMEOUT" default:"5s" description:"[deprecated, use --telegram.timeout] telegram timeout"`
-	} `group:"telegram" namespace:"telegram" env-namespace:"TELEGRAM"`
 	Email struct {
 		From                string `long:"from_address" env:"FROM" description:"from email address"`
 		VerificationSubject string `long:"verification_subj" env:"VERIFICATION_SUBJ" description:"verification message subject"`
 		AdminNotifications  bool   `long:"notify_admin" env:"ADMIN" description:"[deprecated, use --notify.admins=email] notify admin on new comments via ADMIN_SHARED_EMAIL"`
 	} `group:"email" namespace:"email" env-namespace:"EMAIL"`
-	Slack struct {
-		Token   string `long:"token" env:"TOKEN" description:"slack token"`
-		Channel string `long:"chan" env:"CHAN" description:"slack channel for admin notifications"`
-	} `group:"slack" namespace:"slack" env-namespace:"SLACK"`
-	Webhook struct {
-		URL      string        `long:"url" env:"URL" description:"webhook URL for admin notifications"`
-		Template string        `long:"template" env:"TEMPLATE" description:"webhook payload template (Go text/template); falls back to {\"text\": {{.Text | escapeJSONString}}} when empty"`
-		Headers  []string      `long:"headers" description:"webhook headers in format --notify.webhook.headers=Header1:Value1,Value2,... [$NOTIFY_WEBHOOK_HEADERS]"` // env NOTIFY_WEBHOOK_HEADERS split in code below to allow , inside ""
-		Timeout  time.Duration `long:"timeout" env:"TIMEOUT" description:"webhook timeout" default:"5s"`
-	} `group:"webhook" namespace:"webhook" env-namespace:"WEBHOOK"`
-}
-
-// SSLGroup defines options group for server ssl params
-type SSLGroup struct {
-	Type         string `long:"type" env:"TYPE" description:"ssl (auto) support" choice:"none" choice:"static" choice:"auto" default:"none"` //nolint
-	Port         int    `long:"port" env:"PORT" description:"port number for https server" default:"8443"`
-	Cert         string `long:"cert" env:"CERT" description:"path to the cert.pem file"`
-	Key          string `long:"key" env:"KEY" description:"path to the key.pem file"`
-	ACMELocation string `long:"acme-location" env:"ACME_LOCATION" description:"dir where certificates will be stored by autocert manager" default:"./var/acme"`
-	ACMEEmail    string `long:"acme-email" env:"ACME_EMAIL" description:"admin email for certificate notifications"`
-}
-
-// RPCGroup defines options for remote modules (plugins)
-type RPCGroup struct {
-	API          string        `long:"api" env:"API" description:"rpc extension api url"`
-	TimeOut      time.Duration `long:"timeout" env:"TIMEOUT" default:"5s" description:"http timeout"`
-	AuthUser     string        `long:"auth_user" env:"AUTH_USER" description:"basic auth user name"`
-	AuthPassword string        `long:"auth_passwd" env:"AUTH_PASSWD" description:"basic auth user password"`
-}
-
-// AdminRPCGroup defines options for remote admin store
-type AdminRPCGroup struct {
-	RPCGroup
-	SecretPerSite bool `long:"secret_per_site" env:"SECRET_PER_SITE" description:"enable JWT secret retrieval per aud, which is site_id in this case"`
 }
 
 // LoadingCache defines interface for caching
@@ -327,7 +206,6 @@ type serverApp struct {
 	restSrv       *api.Rest
 	migratorSrv   *api.Migrator
 	exporter      migrator.Exporter
-	devAuth       *provider.DevAuthServer
 	dataService   *service.DataStore
 	avatarStore   avatar.Store
 	notifyService *notify.Service
@@ -343,17 +221,7 @@ func (s *ServerCommand) Execute(_ []string) error {
 	log.Printf("[INFO] start server on port %s:%d", s.Address, s.Port)
 	resetEnv(
 		"SECRET",
-		"AUTH_APPLE_KID",
-		"AUTH_GOOGLE_CSEC",
 		"AUTH_GITHUB_CSEC",
-		"AUTH_FACEBOOK_CSEC",
-		"AUTH_MICROSOFT_CSEC",
-		"AUTH_TWITTER_CSEC",
-		"AUTH_YANDEX_CSEC",
-		"AUTH_PATREON_CSEC",
-		"AUTH_DISCORD_CSEC",
-		"AUTH_CUSTOM_CSEC",
-		"TELEGRAM_TOKEN",
 		"SMTP_PASSWORD",
 		"ADMIN_PASSWD",
 	)
@@ -385,34 +253,6 @@ func (s *ServerCommand) Execute(_ []string) error {
 // (as some entries are removed without substitute).
 // Also it returns flags found by findDeprecatedFlagsCollisions, with DeprecatedFlag.Collision flag set.
 func (s *ServerCommand) HandleDeprecatedFlags() (result []DeprecatedFlag) {
-	if s.Auth.Email.Host != "" && s.SMTP.Host == "" {
-		s.SMTP.Host = s.Auth.Email.Host
-		result = append(result, DeprecatedFlag{Old: "auth.email.host", New: "smtp.host", Version: "1.5"})
-	}
-	if s.Auth.Email.Port != 0 && s.SMTP.Port == 0 {
-		s.SMTP.Port = s.Auth.Email.Port
-		result = append(result, DeprecatedFlag{Old: "auth.email.port", New: "smtp.port", Version: "1.5"})
-	}
-	if s.Auth.Email.TLS && !s.SMTP.TLS {
-		s.SMTP.TLS = s.Auth.Email.TLS
-		result = append(result, DeprecatedFlag{Old: "auth.email.tls", New: "smtp.tls", Version: "1.5"})
-	}
-	if s.Auth.Email.SMTPUserName != "" && s.SMTP.Username == "" {
-		s.SMTP.Username = s.Auth.Email.SMTPUserName
-		result = append(result, DeprecatedFlag{Old: "auth.email.user", New: "smtp.username", Version: "1.5"})
-	}
-	if s.Auth.Email.SMTPPassword != "" && s.SMTP.Password == "" {
-		s.SMTP.Password = s.Auth.Email.SMTPPassword
-		result = append(result, DeprecatedFlag{Old: "auth.email.passwd", New: "smtp.password", Version: "1.5"})
-	}
-	const emailDefaultTimout = 10 * time.Second
-	if s.Auth.Email.TimeOut != emailDefaultTimout && s.SMTP.TimeOut == emailDefaultTimout {
-		s.SMTP.TimeOut = s.Auth.Email.TimeOut
-		result = append(result, DeprecatedFlag{Old: "auth.email.timeout", New: "smtp.timeout", Version: "1.5"})
-	}
-	if s.Auth.Email.MsgTemplate != "email_confirmation_login.html.tmpl" {
-		result = append(result, DeprecatedFlag{Old: "auth.email.template", Version: "1.5"})
-	}
 	if s.LegacyImageProxy && !s.ImageProxy.HTTP2HTTPS {
 		s.ImageProxy.HTTP2HTTPS = s.LegacyImageProxy
 		result = append(result, DeprecatedFlag{Old: "img-proxy", New: "image-proxy.http2https", Version: "1.5"})
@@ -427,24 +267,6 @@ func (s *ServerCommand) HandleDeprecatedFlags() (result []DeprecatedFlag) {
 		s.Notify.Admins = append(s.Notify.Admins, "email")
 		result = append(result, DeprecatedFlag{Old: "notify.email.notify_admin", New: "notify.admins=email", Version: "1.9"})
 	}
-	if s.Notify.Telegram.Token != "" && s.Telegram.Token == "" {
-		s.Telegram.Token = s.Notify.Telegram.Token
-		result = append(result, DeprecatedFlag{Old: "notify.telegram.token", New: "telegram.token", Version: "1.9"})
-	}
-	const telegramDefaultTimeout = time.Second * 5
-	if s.Notify.Telegram.Timeout != telegramDefaultTimeout && s.Telegram.Timeout == telegramDefaultTimeout {
-		s.Telegram.Timeout = s.Notify.Telegram.Timeout
-		result = append(result, DeprecatedFlag{Old: "notify.telegram.timeout", New: "telegram.timeout", Version: "1.9"})
-	}
-	if s.Notify.Telegram.API != "https://api.telegram.org/bot" {
-		result = append(result, DeprecatedFlag{Old: "notify.telegram.api", Version: "1.9"})
-	}
-	if s.Auth.Twitter.CID != "" {
-		result = append(result, DeprecatedFlag{Old: "auth.twitter.cid", Version: "1.14"})
-	}
-	if s.Auth.Twitter.CSEC != "" {
-		result = append(result, DeprecatedFlag{Old: "auth.twitter.csec", Version: "1.14"})
-	}
 	return append(result, s.findDeprecatedFlagsCollisions()...)
 }
 
@@ -453,32 +275,9 @@ func (s *ServerCommand) HandleDeprecatedFlags() (result []DeprecatedFlag) {
 // It returns DeprecatedFlag list which always has only DeprecatedFlag.Old and DeprecatedFlag.New set,
 // and DeprecatedFlag.Collision set to true.
 func (s *ServerCommand) findDeprecatedFlagsCollisions() (result []DeprecatedFlag) {
-	if stringsSetAndDifferent(s.Auth.Email.Host, s.SMTP.Host) {
-		result = append(result, DeprecatedFlag{Old: "auth.email.host", New: "smtp.host", Collision: true})
-	}
-	if s.Auth.Email.Port != 0 && s.SMTP.Port != 0 && s.Auth.Email.Port != s.SMTP.Port {
-		result = append(result, DeprecatedFlag{Old: "auth.email.port", New: "smtp.port", Collision: true})
-	}
-	if stringsSetAndDifferent(s.Auth.Email.SMTPUserName, s.SMTP.Username) {
-		result = append(result, DeprecatedFlag{Old: "auth.email.user", New: "smtp.username", Collision: true})
-	}
-	if stringsSetAndDifferent(s.Auth.Email.SMTPPassword, s.SMTP.Password) {
-		result = append(result, DeprecatedFlag{Old: "auth.email.passwd", New: "smtp.password", Collision: true})
-	}
-	const emailDefaultTimout = 10 * time.Second
-	if s.Auth.Email.TimeOut != emailDefaultTimout && s.SMTP.TimeOut != emailDefaultTimout && s.Auth.Email.TimeOut != s.SMTP.TimeOut {
-		result = append(result, DeprecatedFlag{Old: "auth.email.timeout", New: "smtp.timeout", Collision: true})
-	}
 	if !contains("none", s.Notify.Type) &&
 		(!contains("none", s.Notify.Users) || !contains("none", s.Notify.Admins)) {
 		result = append(result, DeprecatedFlag{Old: "notify.type", New: "notify.(users|admins)", Collision: true})
-	}
-	if stringsSetAndDifferent(s.Notify.Telegram.Token, s.Telegram.Token) {
-		result = append(result, DeprecatedFlag{Old: "notify.telegram.token", New: "telegram.token", Collision: true})
-	}
-	const telegramDefaultTimeout = time.Second * 5
-	if s.Notify.Telegram.Timeout != telegramDefaultTimeout && s.Telegram.Timeout != telegramDefaultTimeout && s.Notify.Telegram.Timeout != s.Telegram.Timeout {
-		result = append(result, DeprecatedFlag{Old: "notify.telegram.timeout", New: "telegram.timeout", Collision: true})
 	}
 	return result
 }
@@ -488,106 +287,16 @@ func (s *ServerCommand) handleDeprecatedNotifications() {
 		if t == "email" && !contains(t, s.Notify.Users) {
 			s.Notify.Users = append(s.Notify.Users, t)
 		}
-		if (t == "telegram" || t == "slack") && !contains(t, s.Notify.Admins) {
-			s.Notify.Admins = append(s.Notify.Admins, t)
-		}
 	}
-}
-
-func stringsSetAndDifferent(s1, s2 string) bool {
-	if s1 != "" && s2 != "" && s1 != s2 {
-		return true
-	}
-	return false
 }
 
 func contains(s string, a []string) bool {
 	return slices.Contains(a, s)
 }
 
-var reservedCustomProviderNames = map[string]struct{}{
-	"email":     {},
-	"anonymous": {},
-	"google":    {},
-	"github":    {},
-	"facebook":  {},
-	"yandex":    {},
-	"twitter":   {},
-	"microsoft": {},
-	"patreon":   {},
-	"discord":   {},
-	"telegram":  {},
-	"dev":       {},
-	"apple":     {},
-}
-
-var validCustomProviderName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
-
-func isReservedCustomProviderName(name string) bool {
-	_, ok := reservedCustomProviderNames[name]
-	return ok
-}
-
-func isValidCustomProviderName(name string) bool {
-	return validCustomProviderName.MatchString(name)
-}
-
-func customProviderSourceID(data provider.UserData, cfg CustomAuthGroup) string {
-	sourceID := data.Value(cfg.IDField)
-	if sourceID == "" {
-		sourceID = data.Value(cfg.EmailField)
-	}
-	if sourceID == "" {
-		sourceID = data.Value(cfg.NameField)
-	}
-	if sourceID == "" {
-		sourceID = data.Value(cfg.PictureField)
-	}
-	if sourceID == "" {
-		payload, err := json.Marshal(data)
-		if err != nil {
-			log.Printf("[WARN] failed to serialize custom oauth user data for ID fallback: %v", err)
-		} else {
-			sourceID = string(payload)
-		}
-	}
-	if sourceID == "" || sourceID == "{}" {
-		log.Printf("[WARN] custom oauth provider returned no stable user identifier fields, falling back to hashed payload")
-	}
-	return sourceID
-}
-
-func (c CustomAuthGroup) isConfigured() bool {
-	return c.Name != "" || c.CID != "" || c.CSEC != "" || c.AuthURL != "" || c.TokenURL != "" || c.InfoURL != "" ||
-		len(c.Scopes) > 0 || c.IDField != "sub" || c.NameField != "name" || c.PictureField != "picture" || c.EmailField != "email"
-}
-
-func (c CustomAuthGroup) missingRequired() []string {
-	missing := []string{}
-	if c.Name == "" {
-		missing = append(missing, "AUTH_CUSTOM_NAME")
-	}
-	if c.CID == "" {
-		missing = append(missing, "AUTH_CUSTOM_CID")
-	}
-	if c.CSEC == "" {
-		missing = append(missing, "AUTH_CUSTOM_CSEC")
-	}
-	if c.AuthURL == "" {
-		missing = append(missing, "AUTH_CUSTOM_AUTH_URL")
-	}
-	if c.TokenURL == "" {
-		missing = append(missing, "AUTH_CUSTOM_TOKEN_URL")
-	}
-	if c.InfoURL == "" {
-		missing = append(missing, "AUTH_CUSTOM_INFO_URL")
-	}
-	return missing
-}
-
 // newServerApp prepares application and return it with all active parts
 // doesn't start anything
-func (s *ServerCommand) newServerApp(ctx context.Context) (*serverApp, error) {
+func (s *ServerCommand) newServerApp(_ context.Context) (*serverApp, error) {
 	if err := makeDirs(s.BackupLocation); err != nil {
 		return nil, fmt.Errorf("failed to create backup store: %w", err)
 	}
@@ -655,27 +364,16 @@ func (s *ServerCommand) newServerApp(ctx context.Context) (*serverApp, error) {
 	authRefreshCache := newAuthRefreshCache()
 	authenticator := s.getAuthenticator(dataService, avatarStore, adminStore, authRefreshCache)
 
-	telegramAuth := s.makeTelegramAuth(authenticator) // telegram auth requires TelegramAPI listener which is constructed below
-	telegramService := s.startTelegramAuthAndNotify(ctx, telegramAuth)
-
-	err = s.addAuthProviders(authenticator)
-	if err != nil {
-		_ = dataService.Close()
-		_ = authRefreshCache.Close()
-		return nil, fmt.Errorf("failed to make authenticator: %w", err)
-	}
+	s.addAuthProviders(authenticator)
 
 	exporter := &migrator.Native{DataStore: dataService}
 
 	migr := &api.Migrator{
-		Cache:             loadingCache,
-		NativeImporter:    &migrator.Native{DataStore: dataService},
-		DisqusImporter:    &migrator.Disqus{DataStore: dataService},
-		WordPressImporter: &migrator.WordPress{DataStore: dataService, DisableFancyTextFormatting: s.DisableFancyTextFormatting},
-		CommentoImporter:  &migrator.Commento{DataStore: dataService},
-		NativeExporter:    &migrator.Native{DataStore: dataService},
-		URLMapperMaker:    migrator.NewURLMapper,
-		KeyStore:          adminStore,
+		Cache:          loadingCache,
+		NativeImporter: &migrator.Native{DataStore: dataService},
+		NativeExporter: &migrator.Native{DataStore: dataService},
+		URLMapperMaker: migrator.NewURLMapper,
+		KeyStore:       adminStore,
 	}
 
 	notifyDestinations, err := s.makeNotifyDestinations(authenticator)
@@ -683,7 +381,7 @@ func (s *ServerCommand) newServerApp(ctx context.Context) (*serverApp, error) {
 		log.Printf("[WARN] failed to prepare notify destinations, %s", err)
 	}
 
-	notifyService := s.makeNotifyService(dataService, notifyDestinations, telegramService)
+	notifyService := s.makeNotifyService(dataService, notifyDestinations)
 
 	imgProxy := &proxy.Image{
 		HTTP2HTTPS:    s.ImageProxy.HTTP2HTTPS,
@@ -697,13 +395,6 @@ func (s *ServerCommand) newServerApp(ctx context.Context) (*serverApp, error) {
 		emojiFmt = func(text string) string { return emoji.Sprint(text) }
 	}
 	commentFormatter := store.NewCommentFormatter(imgProxy, emojiFmt)
-
-	sslConfig, err := s.makeSSLConfig()
-	if err != nil {
-		_ = dataService.Close()
-		_ = authRefreshCache.Close()
-		return nil, fmt.Errorf("failed to make config of ssl server params: %w", err)
-	}
 
 	srv := &api.Rest{
 		Version:                    s.Revision,
@@ -720,12 +411,9 @@ func (s *ServerCommand) newServerApp(ctx context.Context) (*serverApp, error) {
 		Authenticator:              authenticator,
 		Cache:                      loadingCache,
 		NotifyService:              notifyService,
-		TelegramService:            telegramService,
-		SSLConfig:                  sslConfig,
 		UpdateLimiter:              s.UpdateLimit,
 		ImageService:               imageService,
 		EmailNotifications:         contains("email", s.Notify.Users),
-		TelegramNotifications:      contains("telegram", s.Notify.Users) && telegramService != nil,
 		EmojiEnabled:               s.EnableEmoji,
 		AnonVote:                   s.AnonymousVote && s.RestrictVoteIP,
 		SimpleView:                 s.SimpleView,
@@ -740,23 +428,11 @@ func (s *ServerCommand) newServerApp(ctx context.Context) (*serverApp, error) {
 
 	srv.ScoreThresholds.Low, srv.ScoreThresholds.Critical = s.LowScore, s.CriticalScore
 
-	var devAuth *provider.DevAuthServer
-	if s.Auth.Dev {
-		da, errDevAuth := authenticator.DevAuth()
-		if errDevAuth != nil {
-			_ = dataService.Close()
-			_ = authRefreshCache.Close()
-			return nil, fmt.Errorf("can't make dev oauth2 server: %w", errDevAuth)
-		}
-		devAuth = da
-	}
-
 	return &serverApp{
 		ServerCommand:    s,
 		restSrv:          srv,
 		migratorSrv:      migr,
 		exporter:         exporter,
-		devAuth:          devAuth,
 		dataService:      dataService,
 		avatarStore:      avatarStore,
 		notifyService:    notifyService,
@@ -858,9 +534,6 @@ func (a *serverApp) run(ctx context.Context) error {
 	}()
 
 	a.activateBackup(ctx) // runs in goroutine for each site
-	if a.Auth.Dev {
-		go a.devAuth.Run(ctx) // dev oauth2 server on :8084
-	}
 
 	// staging images resubmit after restart of the app
 	if e := a.dataService.ResubmitStagingImages(a.Sites); e != nil {
@@ -872,9 +545,6 @@ func (a *serverApp) run(ctx context.Context) error {
 	a.restSrv.Run(a.Address, a.Port)
 
 	// shutdown procedures after HTTP server is stopped
-	if a.devAuth != nil {
-		a.devAuth.Shutdown()
-	}
 	if e := a.dataService.Close(); e != nil {
 		log.Printf("[WARN] failed to close data store, %s", e)
 	}
@@ -930,14 +600,6 @@ func (s *ServerCommand) makeDataStore() (result engine.Interface, err error) {
 			sites = append(sites, engine.BoltSite{SiteID: site, FileName: fmt.Sprintf("%s/%s.db", s.Store.Bolt.Path, site)})
 		}
 		result, err = engine.NewBoltDB(bolt.Options{Timeout: s.Store.Bolt.Timeout}, sites...)
-	case "rpc":
-		r := &engine.RPC{Client: jrpc.Client{
-			API:        s.Store.RPC.API,
-			Client:     http.Client{Timeout: s.Store.RPC.TimeOut},
-			AuthUser:   s.Store.RPC.AuthUser,
-			AuthPasswd: s.Store.RPC.AuthPassword,
-		}}
-		return r, nil
 	default:
 		return nil, fmt.Errorf("unsupported store type %s", s.Store.Type)
 	}
@@ -956,11 +618,6 @@ func (s *ServerCommand) makeAvatarStore() (avatar.Store, error) {
 			return nil, fmt.Errorf("failed to create avatar store: %w", err)
 		}
 		return avatar.NewLocalFS(s.Avatar.FS.Path), nil
-	case "bolt":
-		if err := makeDirs(path.Dir(s.Avatar.Bolt.File)); err != nil {
-			return nil, fmt.Errorf("failed to create avatar store: %w", err)
-		}
-		return avatar.NewBoltDB(s.Avatar.Bolt.File, bolt.Options{})
 	case "uri":
 		return avatar.NewStore(s.Avatar.URI)
 	}
@@ -992,14 +649,6 @@ func (s *ServerCommand) makePicturesStore() (*image.Service, error) {
 			Staging:    s.Image.FS.Staging,
 			Partitions: s.Image.FS.Partitions,
 		}, imageServiceParams), nil
-	case "rpc":
-		return image.NewService(&image.RPC{
-			Client: jrpc.Client{
-				API:        s.Image.RPC.API,
-				Client:     http.Client{Timeout: s.Image.RPC.TimeOut},
-				AuthUser:   s.Image.RPC.AuthUser,
-				AuthPasswd: s.Image.RPC.AuthPassword,
-			}}, imageServiceParams), nil
 	}
 	return nil, fmt.Errorf("unsupported pictures store type %s", s.Image.Type)
 }
@@ -1018,14 +667,6 @@ func (s *ServerCommand) makeAdminStore() (admin.Store, error) {
 			sharedAdminEmail = s.Admin.Shared.Email[0]
 		}
 		return admin.NewStaticStore(s.SharedSecret, s.Sites, s.Admin.Shared.Admins, sharedAdminEmail), nil
-	case "rpc":
-		r := &admin.RPC{Client: jrpc.Client{
-			API:        s.Admin.RPC.API,
-			Client:     http.Client{Timeout: s.Admin.RPC.TimeOut},
-			AuthUser:   s.Admin.RPC.AuthUser,
-			AuthPasswd: s.Admin.RPC.AuthPassword,
-		}}
-		return r, nil
 	default:
 		return nil, fmt.Errorf("unsupported admin store type %s", s.Admin.Type)
 	}
@@ -1035,17 +676,6 @@ func (s *ServerCommand) makeCache() (LoadingCache, error) {
 	log.Printf("[INFO] make cache, type=%s", s.Cache.Type)
 	o := cache.NewOpts[[]byte]()
 	switch s.Cache.Type {
-	case "redis_pub_sub":
-		redisPubSub, err := eventbus.NewRedisPubSub(s.Cache.RedisAddr, "remark42-cache")
-		if err != nil {
-			return nil, fmt.Errorf("cache backend initialization, redis PubSub initialisation: %w", err)
-		}
-		backend, err := cache.NewLruCache(o.MaxCacheSize(s.Cache.Max.Size), o.MaxValSize(s.Cache.Max.Value),
-			o.MaxKeys(s.Cache.Max.Items), o.EventBus(redisPubSub))
-		if err != nil {
-			return nil, fmt.Errorf("cache backend initialization: %w", err)
-		}
-		return cache.NewScache[[]byte](backend), nil
 	case "mem":
 		backend, err := cache.NewLruCache(o.MaxCacheSize(s.Cache.Max.Size), o.MaxValSize(s.Cache.Max.Value),
 			o.MaxKeys(s.Cache.Max.Items))
@@ -1059,198 +689,17 @@ func (s *ServerCommand) makeCache() (LoadingCache, error) {
 	return nil, fmt.Errorf("unsupported cache type %s", s.Cache.Type)
 }
 
-//nolint:gocyclo // simple code but many if checks
-func (s *ServerCommand) addAuthProviders(authenticator *auth.Service) error {
-	providersCount := 0
-	if s.Auth.Telegram {
-		providersCount++
-	}
-
-	if s.Auth.Apple.CID != "" && s.Auth.Apple.TID != "" && s.Auth.Apple.KID != "" {
-		err := authenticator.AddAppleProvider(
-			provider.AppleConfig{
-				ClientID: s.Auth.Apple.CID,
-				TeamID:   s.Auth.Apple.TID,
-				KeyID:    s.Auth.Apple.KID,
-			},
-			provider.LoadApplePrivateKeyFromFile(s.Auth.Apple.PrivateKeyFilePath),
-		)
-		if err != nil {
-			return err
-		}
-		providersCount++
-	}
-	if s.Auth.Google.CID != "" && s.Auth.Google.CSEC != "" {
-		authenticator.AddProvider("google", s.Auth.Google.CID, s.Auth.Google.CSEC)
-		providersCount++
-	}
+func (s *ServerCommand) addAuthProviders(authenticator *auth.Service) {
 	if s.Auth.Github.CID != "" && s.Auth.Github.CSEC != "" {
 		authenticator.AddProvider("github", s.Auth.Github.CID, s.Auth.Github.CSEC)
-		providersCount++
-	}
-	if s.Auth.Facebook.CID != "" && s.Auth.Facebook.CSEC != "" {
-		authenticator.AddProvider("facebook", s.Auth.Facebook.CID, s.Auth.Facebook.CSEC)
-		providersCount++
-	}
-	if s.Auth.Microsoft.CID != "" && s.Auth.Microsoft.CSEC != "" {
-		authenticator.AddMicrosoftProvider(s.Auth.Microsoft.CID, s.Auth.Microsoft.CSEC, s.Auth.Microsoft.Tenant)
-		providersCount++
-	}
-	if s.Auth.Yandex.CID != "" && s.Auth.Yandex.CSEC != "" {
-		authenticator.AddProvider("yandex", s.Auth.Yandex.CID, s.Auth.Yandex.CSEC)
-		providersCount++
-	}
-	if s.Auth.Twitter.CID != "" && s.Auth.Twitter.CSEC != "" {
-		authenticator.AddProvider("twitter", s.Auth.Twitter.CID, s.Auth.Twitter.CSEC)
-		providersCount++
-	}
-	if s.Auth.Patreon.CID != "" && s.Auth.Patreon.CSEC != "" {
-		authenticator.AddProvider("patreon", s.Auth.Patreon.CID, s.Auth.Patreon.CSEC)
-		providersCount++
-	}
-	if s.Auth.Discord.CID != "" && s.Auth.Discord.CSEC != "" {
-		authenticator.AddProvider("discord", s.Auth.Discord.CID, s.Auth.Discord.CSEC)
-		providersCount++
-	}
-
-	if s.Auth.Custom.isConfigured() {
-		missing := s.Auth.Custom.missingRequired()
-		if len(missing) > 0 {
-			return fmt.Errorf("custom oauth provider configuration is incomplete, missing: %s", strings.Join(missing, ", "))
-		}
-
-		customName := strings.ToLower(strings.TrimSpace(s.Auth.Custom.Name))
-		if !isValidCustomProviderName(customName) {
-			return fmt.Errorf("custom oauth provider name %q is invalid, expected pattern %q", customName, validCustomProviderName.String())
-		}
-		if isReservedCustomProviderName(customName) {
-			return fmt.Errorf("custom oauth provider name %q is reserved", customName)
-		}
-
-		authenticator.AddCustomProvider(customName, auth.Client{Cid: s.Auth.Custom.CID, Csecret: s.Auth.Custom.CSEC}, provider.CustomHandlerOpt{
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  s.Auth.Custom.AuthURL,
-				TokenURL: s.Auth.Custom.TokenURL,
-			},
-			InfoURL: s.Auth.Custom.InfoURL,
-			Scopes:  s.Auth.Custom.Scopes,
-			MapUserFn: func(data provider.UserData, _ []byte) token.User {
-				sourceID := customProviderSourceID(data, s.Auth.Custom)
-				hashID := token.HashID(sha1.New(), sourceID) //nolint:gosec // stable provider user id hash
-				user := token.User{
-					ID:      customName + "_" + hashID,
-					Name:    data.Value(s.Auth.Custom.NameField),
-					Picture: data.Value(s.Auth.Custom.PictureField),
-					Email:   data.Value(s.Auth.Custom.EmailField),
-				}
-				if user.Name == "" {
-					user.Name = "noname_" + hashID[:4]
-				}
-				return user
-			},
-		})
-		providersCount++
-	}
-
-	if s.Auth.Dev {
-		log.Print("[INFO] dev access enabled")
-		u, errURL := url.Parse(s.RemarkURL)
-		if errURL != nil {
-			return fmt.Errorf("can't parse Remark42 URL: %w", errURL)
-		}
-		authenticator.AddDevProvider(u.Hostname(), 8084)
-		providersCount++
-	}
-
-	if s.Auth.Email.Enable {
-		params := sender.EmailParams{
-			Host:               s.SMTP.Host,
-			Port:               s.SMTP.Port,
-			SMTPUserName:       s.SMTP.Username,
-			SMTPPassword:       s.SMTP.Password,
-			TimeOut:            s.SMTP.TimeOut,
-			StartTLS:           s.SMTP.StartTLS,
-			LoginAuth:          s.SMTP.LoginAuth,
-			TLS:                s.SMTP.TLS,
-			InsecureSkipVerify: s.SMTP.InsecureSkipVerify,
-			Charset:            "UTF-8",
-			From:               s.Auth.Email.From,
-			Subject:            s.Auth.Email.Subject,
-			ContentType:        s.Auth.Email.ContentType,
-		}
-		sndr := sender.NewEmailClient(params, log.Default())
-		tmpl, err := templates.Read(s.Auth.Email.MsgTemplate)
-		if err != nil {
-			return err
-		}
-		authenticator.AddVerifProvider("email", string(tmpl), sndr)
-	}
-
-	if s.Auth.Anonymous {
-		log.Print("[INFO] anonymous access enabled")
-		var isValidAnonName = regexp.MustCompile(`^[\p{L}\d_ ]+$`).MatchString
-		authenticator.AddDirectProviderWithUserIDFunc("anonymous", provider.CredCheckerFunc(func(user, _ string) (ok bool, err error) {
-
-			// don't allow anon with space prefix or suffix
-			if strings.HasPrefix(user, " ") || strings.HasSuffix(user, " ") {
-				log.Printf("[WARN] name %q has space as a suffix or prefix", user)
-				return false, nil
-			}
-
-			user = strings.TrimSpace(user)
-			if len(user) < 3 {
-				log.Printf("[WARN] name %q is too short, should be at least 3 characters", user)
-				return false, nil
-			}
-			if len(user) > 64 {
-				log.Printf("[WARN] name %q is too long, should be up to 64 characters", user)
-				return false, nil
-			}
-
-			if !isValidAnonName(user) {
-				log.Printf("[WARN] name %q should have letters, digits, underscores and spaces only", user)
-				return false, nil
-			}
-			return true, nil
-		}),
-			// custom user ID generator, used to distinguish anonymous users with the same login
-			// coming from different IPs
-			func(user string, r *http.Request) string {
-				return user + r.RemoteAddr
-			})
-	}
-
-	if providersCount == 0 {
+	} else {
 		log.Printf("[WARN] no auth providers defined")
 	}
-
-	return nil
 }
 
-// creates and registers telegram auth, which we need separately from other auth providers
-func (s *ServerCommand) makeTelegramAuth(authenticator *auth.Service) providers.TGUpdatesReceiver {
-	if s.Auth.Telegram {
-		telegram := &provider.TelegramHandler{
-			ProviderName: "telegram",
-			SuccessMsg:   "✅ You have successfully authenticated, check the web!",
-			Telegram:     provider.NewTelegramAPI(s.Telegram.Token, &http.Client{Timeout: s.Telegram.Timeout}),
-			L:            log.Default(),
-			TokenService: authenticator.TokenService(),
-			AvatarSaver:  authenticator.AvatarProxy(),
-		}
-		authenticator.AddCustomHandler(telegram)
-		return telegram
-	}
-	return nil
-}
-
-func (s *ServerCommand) makeNotifyService(dataStore *service.DataStore, destinations []notify.Destination, telegram *notify.Telegram) *notify.Service {
+func (s *ServerCommand) makeNotifyService(dataStore *service.DataStore, destinations []notify.Destination) *notify.Service {
 	if destinations == nil {
 		destinations = []notify.Destination{}
-	}
-	// it's possible that telegram notification service was created for auth but should not be used for notifications
-	if telegram != nil && (contains("telegram", s.Notify.Users) || contains("telegram", s.Notify.Admins)) {
-		destinations = append(destinations, telegram)
 	}
 
 	if len(destinations) > 0 {
@@ -1260,33 +709,9 @@ func (s *ServerCommand) makeNotifyService(dataStore *service.DataStore, destinat
 	return notify.NopService
 }
 
-// constructs list of notify destinations except for telegram, returns empty list in case of error
+// constructs list of notify destinations, returns empty list in case of error
 func (s *ServerCommand) makeNotifyDestinations(authenticator *auth.Service) ([]notify.Destination, error) {
 	destinations := make([]notify.Destination, 0)
-
-	if contains("webhook", s.Notify.Admins) {
-		webhookHeaders := s.Notify.Webhook.Headers
-		if len(webhookHeaders) == 0 {
-			webhookHeaders = splitAtCommas(os.Getenv("NOTIFY_WEBHOOK_HEADERS")) // env value may have comma inside "", parsed separately
-		}
-
-		whParams := notify.WebhookParams{
-			URL:      s.Notify.Webhook.URL,
-			Template: s.Notify.Webhook.Template,
-			Headers:  webhookHeaders,
-			Timeout:  time.Second * 5,
-		}
-		webhook, err := notify.NewWebhook(whParams)
-		if err != nil {
-			return destinations, fmt.Errorf("failed to create webhook notification destination: %w", err)
-		}
-		destinations = append(destinations, webhook)
-	}
-
-	if contains("slack", s.Notify.Admins) {
-		slack := notify.NewSlack(s.Notify.Slack.Token, s.Notify.Slack.Channel)
-		destinations = append(destinations, slack)
-	}
 
 	// with logic below admin notifications enable notifications for users on the backend even if they
 	// are not enabled explicitly, however they won't be visible to the users in the frontend
@@ -1297,8 +722,6 @@ func (s *ServerCommand) makeNotifyDestinations(authenticator *auth.Service) ([]n
 			VerificationTemplatePath: s.emailVerificationTemplatePath, From: s.Notify.Email.From,
 			VerificationSubject: s.Notify.Email.VerificationSubject,
 			UnsubscribeURL:      s.RemarkURL + "/email/unsubscribe.html",
-			// TODO: uncomment after #560 frontend part is ready and URL is known
-			// subscribeURL:        s.RemarkURL + "/subscribe.html?token=",
 			TokenGenFn: func(userID, email, site string) (string, error) {
 				claims := token.Claims{
 					Handshake: &token.Handshake{ID: userID + "::" + email},
@@ -1340,55 +763,6 @@ func (s *ServerCommand) makeNotifyDestinations(authenticator *auth.Service) ([]n
 	}
 
 	return destinations, nil
-}
-
-// constructs Telegram notify service
-func (s *ServerCommand) makeTelegramNotify() (*notify.Telegram, error) {
-	if contains("telegram", s.Notify.Admins) && s.Notify.Telegram.Channel == "" {
-		return nil, fmt.Errorf("--notify.telegram.channel must be set for admin notifications to work")
-	}
-	telegramParams := notify.TelegramParams{
-		AdminChannelID:    s.Notify.Telegram.Channel,
-		UserNotifications: contains("telegram", s.Notify.Users),
-		Token:             s.Telegram.Token,
-		Timeout:           s.Telegram.Timeout,
-		SuccessMsg:        "✅ You have successfully subscribed for notifications, check the web!",
-	}
-	tg, err := notify.NewTelegram(telegramParams)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create telegram notification destination: %w", err)
-	}
-	return tg, nil
-}
-
-func (s *ServerCommand) makeSSLConfig() (config api.SSLConfig, err error) {
-	switch s.SSL.Type {
-	case "none":
-		config.SSLMode = api.None
-	case "static":
-		if s.SSL.Cert == "" {
-			return config, fmt.Errorf("path to cert.pem is required")
-		}
-		if s.SSL.Key == "" {
-			return config, fmt.Errorf("path to key.pem is required")
-		}
-		config.SSLMode = api.Static
-		config.Port = s.SSL.Port
-		config.Cert = s.SSL.Cert
-		config.Key = s.SSL.Key
-	case "auto":
-		config.SSLMode = api.Auto
-		config.Port = s.SSL.Port
-		config.ACMELocation = s.SSL.ACMELocation
-		if s.SSL.ACMEEmail != "" {
-			config.ACMEEmail = s.SSL.ACMEEmail
-		} else if s.Admin.Type == "shared" && len(s.Admin.Shared.Email) != 0 {
-			config.ACMEEmail = s.Admin.Shared.Email[0]
-		} else if u, e := url.Parse(s.RemarkURL); e == nil {
-			config.ACMEEmail = "admin@" + u.Hostname()
-		}
-	}
-	return config, err
 }
 
 // getAuthenticator creates new authenticator service, which doesn't have any auth providers enabled
@@ -1459,7 +833,7 @@ func (s *ServerCommand) getAuthenticator(ds *service.DataStore, avas avatar.Stor
 		Logger:            log.Default(),
 		RefreshCache:      authRefreshCache,
 		UseGravatar:       true,
-		AudSecrets:        s.Admin.RPC.SecretPerSite,
+		AudSecrets:        false,
 	})
 }
 
@@ -1476,71 +850,6 @@ func (s *ServerCommand) parseSameSite(ss string) http.SameSite {
 	default:
 		return http.SameSiteDefaultMode
 	}
-}
-
-// startTelegramAuthAndNotify initializes telegram notify and auth Telegram Bot listen loop.
-// Does nothing if telegram auth and notifications are disabled.
-func (s *ServerCommand) startTelegramAuthAndNotify(ctx context.Context, telegramAuth providers.TGUpdatesReceiver) (tg *notify.Telegram) {
-	if !contains("telegram", s.Notify.Users) && !contains("telegram", s.Notify.Admins) && !s.Auth.Telegram {
-		return nil
-	}
-
-	var err error
-	if tg, err = s.makeTelegramNotify(); err != nil {
-		log.Printf("[WARN] failed to make telegram notify service, %s", err)
-		return nil
-	}
-
-	telegramReceivers := []providers.TGUpdatesReceiver{tg}
-	if telegramAuth != nil {
-		telegramReceivers = append(telegramReceivers, telegramAuth)
-	}
-	// start bot messages receiver for both notify and auth services
-	go providers.DispatchTelegramUpdates(ctx, tg, telegramReceivers, time.Second*5)
-
-	return tg
-}
-
-// splitAtCommas split s at commas, ignoring commas in strings.
-// Eliminate leading and trailing dbl quotes in each element only if both presented
-// based on https://stackoverflow.com/a/59318708
-func splitAtCommas(s string) []string {
-	cleanup := func(s string) string {
-		if s == "" {
-			return s
-		}
-		res := strings.TrimSpace(s)
-		if res[0] == '"' && res[len(res)-1] == '"' {
-			res = strings.TrimPrefix(res, `"`)
-			res = strings.TrimSuffix(res, `"`)
-		}
-		return res
-	}
-
-	var res []string
-	var beg int
-	var inString bool
-
-	for i := 0; i < len(s); i++ {
-		if s[i] == ',' && !inString {
-			res = append(res, cleanup(s[beg:i]))
-			beg = i + 1
-			continue
-		}
-
-		if s[i] == '"' {
-			if !inString {
-				inString = true
-			} else if i > 0 && s[i-1] != '\\' { // also allow \"
-				inString = false
-			}
-		}
-	}
-	res = append(res, cleanup(s[beg:]))
-	if len(res) == 1 && res[0] == "" {
-		return []string{}
-	}
-	return res
 }
 
 // authRefreshCache used by authenticator to minimize repeatable token refreshes

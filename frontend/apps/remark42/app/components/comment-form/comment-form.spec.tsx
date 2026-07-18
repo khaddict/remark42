@@ -97,7 +97,7 @@ describe('<CommentForm />', () => {
   it(`doesn't render preview button and markdown toolbar in simple mode`, () => {
     setup({ user }, { simple_view: true });
     expect(screen.queryByTestId('markdown-toolbar')).not.toBeInTheDocument();
-    expect(screen.queryByText('Preview')).not.toBeInTheDocument();
+    expect(screen.queryByText('preview')).not.toBeInTheDocument();
   });
 
   it.each`
@@ -122,13 +122,8 @@ describe('<CommentForm />', () => {
         expect(screen.getByText(/Subscribe by/)).toBeVisible();
         expect(screen.getByTitle('Subscribe by RSS')).toBeVisible();
       });
-      it('renders Telegram subscription button', () => {
-        setup({ user }, { simple_view: true, telegram_notifications: true });
-        expect(screen.getByText(/Subscribe by/)).toBeVisible();
-        expect(screen.getByTitle('Subscribe by Telegram')).toBeVisible();
-      });
-      it('renders OR if telegram and RSS are enabled', () => {
-        setup({ user }, { simple_view: true, telegram_notifications: true, email_notifications: false });
+      it('renders OR if RSS and email are enabled', () => {
+        setup({ user }, { simple_view: true, email_notifications: true });
         // I can not use testing-library to check 2 elements with OR exists, because both of them are in the same DOM element
         const container = screen.getByText(/ or/);
         const regex = /\bor\b/g;
@@ -136,28 +131,10 @@ describe('<CommentForm />', () => {
 
         expect(matchCount).toBe(1);
       });
-      it('renders 2 OR if telegram and RSS and email are enabled', () => {
-        setup({ user }, { simple_view: true, telegram_notifications: true, email_notifications: true });
-        const container = screen.getByText(/ or/);
-        const regex = /\bor\b/g;
-        const matchCount = (container.textContent?.match(regex) || []).length;
-
-        expect(matchCount).toBe(2);
-      });
     });
     it('renders without email subscription button when email_notifications disabled', () => {
       setup({ user }, { email_notifications: false });
       expect(screen.queryByTitle('Subscribe by Email')).not.toBeInTheDocument();
-    });
-    it('renders Telegram subscription button', () => {
-      setup({ user }, { telegram_notifications: true });
-      expect(screen.getByText(/Subscribe by/)).toBeVisible();
-      expect(screen.getByTitle('Subscribe by Telegram')).toBeVisible();
-    });
-
-    it('renders without Telegram subscription button if telegram_notifications is false', () => {
-      setup({ user }, { telegram_notifications: false });
-      expect(screen.queryByTitle('Subscribe by Telegram')).not.toBeInTheDocument();
     });
   });
 

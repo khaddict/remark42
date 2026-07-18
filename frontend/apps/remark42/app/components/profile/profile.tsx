@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useIntl, FormattedMessage } from 'react-intl';
 
 import { getUserComments } from 'common/api';
+import { StaticStore } from 'common/static-store';
 import { parseQuery } from 'utils/parse-query';
-import { requestDeletion } from 'utils/email';
 import { setStyles } from 'utils/set-dom-props';
 import { Avatar } from 'components/avatar';
 import { isUserAnonymous } from 'utils/isUserAnonymous';
@@ -32,7 +32,6 @@ async function signout() {
   await logout();
 }
 
-// TODO: rewrite hide user logic and bring button to user profile
 export function Profile() {
   const intl = useIntl();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -87,11 +86,6 @@ export function Profile() {
     setSigningOut(true);
     await signout();
     setSigningOut?.(false);
-  }
-
-  async function handleClickRequestRemoveData() {
-    await requestDeletion();
-    await signout();
   }
 
   useEffect(() => {
@@ -223,12 +217,19 @@ export function Profile() {
         </section>
         {isCurrent && !isUserAnonymous(user as unknown as User) ? (
           <footer className={clsx('profile-footer', styles.footer)}>
-            <Button kind="hollow" size="sm" onClick={handleClickRequestRemoveData}>
-              <FormattedMessage id="profile.request-to-delete-data" defaultMessage="Request my data removal" />
-            </Button>
+            <span className={styles.dataRemovalNotice}>
+              <FormattedMessage
+                id="profile.request-to-delete-data"
+                defaultMessage="To request removal of your data, contact {email}"
+                values={{
+                  email: (
+                    <a href={`mailto:${StaticStore.config.admin_email}`}>{StaticStore.config.admin_email}</a>
+                  ),
+                }}
+              />
+            </span>
           </footer>
-        ) : // TODO: implement hiding user comments
-        null}
+        ) : null}
       </aside>
     </div>
   );

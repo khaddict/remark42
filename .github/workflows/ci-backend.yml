@@ -54,26 +54,11 @@ jobs:
         env:
           TZ: "America/Chicago"
 
-      - name: test examples
-        run: |
-          go test -race ./...
-          go build -race ./...
-        working-directory: backend/_example/memory_store
-        env:
-          TZ: "America/Chicago"
-
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: "v2.10.1"
           working-directory: backend/app
-
-      - name: golangci-lint on example directory
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: "v2.10.1"
-          args: --config ../../.golangci.yml
-          working-directory: backend/_example/memory_store
 
       - name: submit coverage
         run: |
@@ -98,18 +83,13 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: "1.25.12"
-          # both go.sum files so the cache key covers the main and example modules scanned below
-          cache-dependency-path: |
-            backend/go.sum
-            backend/_example/memory_store/go.sum
+          cache-dependency-path: backend/go.sum
 
       - name: govulncheck
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.5.0
           govulncheck ./...
-          (cd _example/memory_store && govulncheck ./...)
         working-directory: backend
         env:
-          # ignore the committed vendor dirs and resolve modules from the cache so
-          # both the main module and the nested example module scan consistently
+          # ignore the committed vendor dir and resolve modules from the cache
           GOFLAGS: "-mod=readonly"

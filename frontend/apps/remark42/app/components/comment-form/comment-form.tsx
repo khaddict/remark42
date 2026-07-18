@@ -14,7 +14,6 @@ import { TextareaAutosize } from 'components/textarea-autosize';
 import { Auth } from 'components/auth';
 
 import { SubscribeByEmail } from './__subscribe-by-email';
-import { SubscribeByTelegram } from './__subscribe-by-telegram';
 import { SubscribeByRSS } from './__subscribe-by-rss';
 
 import { MarkdownToolbar } from './markdown-toolbar';
@@ -363,29 +362,17 @@ export class CommentForm extends Component<Props, State> {
   };
 
   renderMarkdownTip = () => (
-    <div className={styles.markdown}>
-      <FormattedMessage
-        id="commentForm.notice-about-styling"
-        defaultMessage="Styling with <a>Markdown</a> is supported"
-        values={{
-          a: (title: string) => (
-            <a class={styles.markdownLink} target="_blank" href="markdown-help.html">
-              {title}
-            </a>
-          ),
-        }}
-      />
-    </div>
+    <a className={styles.markdownHint} target="_blank" href="markdown-help.html">
+      {this.props.intl.formatMessage(messages.markdownSupported)}
+    </a>
   );
 
   renderSubscribeButtons = () => {
     const isEmailNotifications = StaticStore.config.email_notifications;
     const isEmailSubscription = isEmailNotifications && settings.isEmailSubscription;
-    const isTelegramNotificationsEnabledOnBackend = StaticStore.config.telegram_notifications;
-    const isTelegramSubscription = isTelegramNotificationsEnabledOnBackend && settings.isTelegramSubscription;
 
     const { isRssSubscription } = settings;
-    if (!isRssSubscription && !isEmailSubscription && !isTelegramSubscription) {
+    if (!isRssSubscription && !isEmailSubscription) {
       return null;
     }
 
@@ -400,13 +387,6 @@ export class CommentForm extends Component<Props, State> {
           </>
         )}
         {isEmailSubscription && <SubscribeByEmail />}
-        {(isRssSubscription && isTelegramSubscription) || (isEmailSubscription && isTelegramSubscription) ? (
-          <>
-            {' '}
-            <FormattedMessage id="commentForm.subscribe-or" defaultMessage="or" />{' '}
-          </>
-        ) : null}
-        {isTelegramSubscription && <SubscribeByTelegram />}
       </>
     );
   };
@@ -417,9 +397,9 @@ export class CommentForm extends Component<Props, State> {
     const charactersLeft = StaticStore.config.max_comment_size - text.length;
     const errorMessage = this.props.errorMessage || this.state.errorMessage;
     const Labels = {
-      main: <FormattedMessage id="commentForm.send" defaultMessage="Send" />,
-      edit: <FormattedMessage id="commentForm.save" defaultMessage="Save" />,
-      reply: <FormattedMessage id="commentForm.reply" defaultMessage="Reply" />,
+      main: <FormattedMessage id="commentForm.send" defaultMessage="send" />,
+      edit: <FormattedMessage id="commentForm.save" defaultMessage="save" />,
+      reply: <FormattedMessage id="commentForm.reply" defaultMessage="reply" />,
     };
     const label = buttonText || Labels[mode || 'main'];
     const placeholderMessage = intl.formatMessage(messages.placeholder);
@@ -448,6 +428,7 @@ export class CommentForm extends Component<Props, State> {
               uploadImages={this.uploadImages}
               textareaId={this.textareaId}
             />
+            {this.renderMarkdownTip()}
           </div>
         )}
         <div className={styles.fieldWrapper}>
@@ -490,7 +471,7 @@ export class CommentForm extends Component<Props, State> {
                     disabled={isDisabled}
                     onClick={this.getPreview}
                   >
-                    <FormattedMessage id="commentForm.preview" defaultMessage="Preview" />
+                    <FormattedMessage id="commentForm.preview" defaultMessage="preview" />
                   </Button>
                 )}
                 <Button kind="primary" size="large" className={styles.button} type="submit" disabled={isDisabled}>
@@ -498,18 +479,10 @@ export class CommentForm extends Component<Props, State> {
                 </Button>
               </div>
 
-              {mode === 'main' && (
-                <div className={styles.rss}>
-                  {this.renderMarkdownTip()}
-                  {this.renderSubscribeButtons()}
-                </div>
-              )}
+              {mode === 'main' && <div className={styles.rss}>{this.renderSubscribeButtons()}</div>}
             </>
           ) : (
-            <>
-              <Auth />
-              {this.renderMarkdownTip()}
-            </>
+            <Auth />
           )}
         </div>
 
@@ -536,6 +509,10 @@ export const messages = defineMessages({
   placeholder: {
     id: 'commentForm.input-placeholder',
     defaultMessage: 'Your comment here',
+  },
+  markdownSupported: {
+    id: 'commentForm.markdown-supported',
+    defaultMessage: 'Styling with Markdown is supported',
   },
   uploadFileFail: {
     id: 'commentForm.upload-file-fail',

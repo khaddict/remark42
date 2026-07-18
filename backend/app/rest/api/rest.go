@@ -40,7 +40,6 @@ type Rest struct {
 	CommentFormatter *store.CommentFormatter
 	Migrator         *Migrator
 	NotifyService    *notify.Service
-	TelegramService  telegramService
 	ImageService     *image.Service
 
 	AnonVote        bool
@@ -56,7 +55,6 @@ type Rest struct {
 	}
 	UpdateLimiter              float64
 	EmailNotifications         bool
-	TelegramNotifications      bool
 	EmojiEnabled               bool
 	SimpleView                 bool
 	ProxyCORS                  bool
@@ -67,8 +65,6 @@ type Rest struct {
 	DisableFancyTextFormatting bool // disables SmartyPants in the comment text rendering of the posted comments
 	ExternalImageProxy         bool
 
-	SSLConfig         SSLConfig
-	httpsServer       *http.Server
 	httpServer        *http.Server
 	shutdownRequested bool
 	lock              sync.Mutex
@@ -101,80 +97,27 @@ type treeWithInfo struct {
 	Info store.PostInfo `json:"info"`
 }
 
-// Run the lister and request's router, activate rest server
+// Run the lister and request's router, activate rest server.
+// TLS termination (if any) is expected to happen in front of this server (reverse proxy/ingress).
 func (s *Rest) Run(address string, port int) {
 	if address == "*" {
 		address = ""
 	}
 
-	switch s.SSLConfig.SSLMode {
-	case None:
-		log.Printf("[INFO] activate http rest server on %s:%d", address, port)
+	log.Printf("[INFO] activate http rest server on %s:%d", address, port)
 
-		s.lock.Lock()
-		s.httpServer = s.makeHTTPServer(address, port, s.routes())
-		s.httpServer.ErrorLog = log.ToStdLogger(log.Default(), "WARN")
-		if s.shutdownRequested {
-			s.lock.Unlock()
-			log.Print("[WARN] rest server start canceled")
-			return
-		}
+	s.lock.Lock()
+	s.httpServer = s.makeHTTPServer(address, port, s.routes())
+	s.httpServer.ErrorLog = log.ToStdLogger(log.Default(), "WARN")
+	if s.shutdownRequested {
 		s.lock.Unlock()
-
-		err := s.httpServer.ListenAndServe()
-		log.Printf("[WARN] http server terminated, %s", err)
-	case Static:
-		log.Printf("[INFO] activate https server in 'static' mode on %s:%d", address, s.SSLConfig.Port)
-
-		s.lock.Lock()
-		s.httpsServer = s.makeHTTPSServer(address, s.SSLConfig.Port, s.routes())
-		s.httpsServer.ErrorLog = log.ToStdLogger(log.Default(), "WARN")
-
-		s.httpServer = s.makeHTTPServer(address, port, s.httpToHTTPSRouter())
-		s.httpServer.ErrorLog = log.ToStdLogger(log.Default(), "WARN")
-		if s.shutdownRequested {
-			s.lock.Unlock()
-			log.Print("[WARN] rest server start canceled")
-			return
-		}
-		s.lock.Unlock()
-
-		go func() {
-			log.Printf("[INFO] activate http redirect server on %s:%d", address, port)
-			err := s.httpServer.ListenAndServe()
-			log.Printf("[WARN] http redirect server terminated, %s", err)
-		}()
-
-		err := s.httpsServer.ListenAndServeTLS(s.SSLConfig.Cert, s.SSLConfig.Key)
-		log.Printf("[WARN] https server terminated, %s", err)
-	case Auto:
-		log.Printf("[INFO] activate https server in 'auto' mode on %s:%d", address, s.SSLConfig.Port)
-
-		m := s.makeAutocertManager()
-		s.lock.Lock()
-		s.httpsServer = s.makeHTTPSAutocertServer(address, s.SSLConfig.Port, s.routes(), m)
-		s.httpsServer.ErrorLog = log.ToStdLogger(log.Default(), "WARN")
-
-		s.httpServer = s.makeHTTPServer(address, port, s.httpChallengeRouter(m))
-		s.httpServer.ErrorLog = log.ToStdLogger(log.Default(), "WARN")
-		if s.shutdownRequested {
-			s.lock.Unlock()
-			log.Print("[WARN] rest server start canceled")
-			return
-		}
-
-		s.lock.Unlock()
-
-		go func() {
-			log.Printf("[INFO] activate http challenge server on port %d", port)
-
-			err := s.httpServer.ListenAndServe()
-			log.Printf("[WARN] http challenge server terminated, %s", err)
-		}()
-
-		err := s.httpsServer.ListenAndServeTLS("", "")
-		log.Printf("[WARN] https server terminated, %s", err)
+		log.Print("[WARN] rest server start canceled")
+		return
 	}
+	s.lock.Unlock()
+
+	err := s.httpServer.ListenAndServe()
+	log.Printf("[WARN] http server terminated, %s", err)
 }
 
 // Shutdown rest http server
@@ -190,14 +133,6 @@ func (s *Rest) Shutdown() {
 		}
 		log.Print("[DEBUG] shutdown http server completed")
 	}
-
-	if s.httpsServer != nil {
-		log.Print("[WARN] shutdown https server")
-		if err := s.httpsServer.Shutdown(ctx); err != nil {
-			log.Printf("[DEBUG] https shutdown error, %s", err)
-		}
-		log.Print("[DEBUG] shutdown https server completed")
-	}
 	s.lock.Unlock()
 }
 
@@ -206,8 +141,7 @@ func (s *Rest) makeHTTPServer(address string, port int, router http.Handler) *ht
 		Addr:              fmt.Sprintf("%s:%d", address, port),
 		Handler:           router,
 		ReadHeaderTimeout: 5 * time.Second,
-		// WriteTimeout:      120 * time.Second, // TODO: such a long timeout needed for blocking export (backup) request
-		IdleTimeout: 30 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 }
 
@@ -239,8 +173,7 @@ func (s *Rest) routes() http.Handler {
 
 	router.Route(func(r *routegroup.Bundle) {
 		r.Use(R.Timeout(5 * time.Second))
-		r.Use(logInfoWithBody, rateLimiter(2), R.NoCache)
-		r.Use(validEmailAuth()) // reject suspicious email logins
+		r.Use(logInfoWithBody, rateLimiter(10), R.NoCache)
 		r.Handle("/auth/", authHandler)
 	})
 
@@ -296,7 +229,6 @@ func (s *Rest) routes() http.Handler {
 		ropen.Use(authMiddleware.Trace, logInfoWithBody)
 		ropen.HandleFunc("GET /img", s.ImageProxy.Handler)
 		ropen.HandleFunc("GET /picture/{user}/{id}", s.pubRest.loadPictureCtrl)
-		ropen.HandleFunc("GET /qr/telegram", s.pubRest.telegramQrCtrl)
 	})
 
 	// protected routes, require auth
@@ -363,8 +295,6 @@ func (s *Rest) routes() http.Handler {
 		rauth.With(rejectAnonUser).HandleFunc("POST /email/subscribe", s.privRest.sendEmailConfirmationCtrl)
 		rauth.With(rejectAnonUser).HandleFunc("POST /email/confirm", s.privRest.setConfirmedEmailCtrl)
 		rauth.With(rejectAnonUser).HandleFunc("DELETE /email", s.privRest.deleteEmailCtrl)
-		rauth.With(rejectAnonUser, rejectHead("GET")).HandleFunc("GET /telegram/subscribe", s.privRest.telegramSubscribeCtrl)
-		rauth.With(rejectAnonUser).HandleFunc("DELETE /telegram", s.privRest.deleteTelegramCtrl)
 	})
 
 	// protected routes, anonymous rejected
@@ -407,7 +337,6 @@ func (s *Rest) controllerGroups() (public, private, admin, rss) {
 		readOnlyAge:                s.ReadOnlyAge,
 		authenticator:              s.Authenticator,
 		notifyService:              s.NotifyService,
-		telegramService:            s.TelegramService,
 		remarkURL:                  s.RemarkURL,
 		anonVote:                   s.AnonVote,
 		disableFancyTextFormatting: s.DisableFancyTextFormatting,
@@ -461,7 +390,6 @@ func (s *Rest) configCtrl(w http.ResponseWriter, r *http.Request) {
 		ReadOnlyAge           int      `json:"readonly_age"`
 		MaxImageSize          int      `json:"max_image_size"`
 		EmailNotifications    bool     `json:"email_notifications"`
-		TelegramNotifications bool     `json:"telegram_notifications"`
 		EmojiEnabled          bool     `json:"emoji_enabled"`
 		SimpleView            bool     `json:"simple_view"`
 		SendJWTHeader         bool     `json:"send_jwt_header"`
@@ -480,7 +408,6 @@ func (s *Rest) configCtrl(w http.ResponseWriter, r *http.Request) {
 		ReadOnlyAge:           s.ReadOnlyAge,
 		MaxImageSize:          s.ImageService.MaxSize,
 		EmailNotifications:    s.EmailNotifications,
-		TelegramNotifications: s.TelegramNotifications,
 		EmojiEnabled:          s.EmojiEnabled,
 		AnonVote:              s.AnonVote,
 		SimpleView:            s.SimpleView,

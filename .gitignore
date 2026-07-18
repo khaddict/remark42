@@ -30,3 +30,5 @@ http-client.env.json
 
 # ralphex progress logs
 .ralphex/progress/
+
+_preview/

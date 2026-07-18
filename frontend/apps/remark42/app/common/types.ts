@@ -90,25 +90,12 @@ export interface Tree {
   info: PostInfo;
 }
 
-export type DefaultOAuthProvider =
-  | 'apple'
-  | 'facebook'
-  | 'twitter'
-  | 'google'
-  | 'yandex'
-  | 'github'
-  | 'microsoft'
-  | 'patreon'
-  | 'discord'
-  | 'telegram'
-  | 'dev';
+export type DefaultOAuthProvider = 'github';
 export type OAuthProvider = DefaultOAuthProvider | (string & {});
-export type FormProvider = 'email' | 'anonymous';
-export type Provider = OAuthProvider | FormProvider;
 
 export interface Config {
   version: string;
-  auth_providers: Provider[];
+  auth_providers: OAuthProvider[];
   edit_duration: number;
   admin_edit: boolean;
   max_comment_size: number;
@@ -122,7 +109,6 @@ export interface Config {
   simple_view: boolean;
   anon_vote: boolean;
   email_notifications: boolean;
-  telegram_notifications: boolean;
   emoji_enabled: boolean;
 }
 

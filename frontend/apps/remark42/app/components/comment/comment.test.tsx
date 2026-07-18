@@ -175,7 +175,7 @@ describe('<Comment />', () => {
 
   it('should render action buttons', () => {
     render(<CommentWithIntl {...props} />);
-    expect(screen.getByText('Reply')).toBeVisible();
+    expect(screen.getByTitle('reply')).toBeVisible();
   });
 
   it.each([
@@ -248,9 +248,9 @@ describe('<Comment />', () => {
     fireEvent(screen.getByText('Edit'), new MouseEvent('click', { bubbles: true }));
     rerender(<CommentWithIntl {...props} />);
     await waitFor(() => {
-      expect(screen.getByText('Cancel')).toBeVisible();
+      expect(screen.getByText('cancel')).toBeVisible();
     });
-    fireEvent(screen.getByText('Cancel'), new MouseEvent('click', { bubbles: true }));
+    fireEvent(screen.getByText('cancel'), new MouseEvent('click', { bubbles: true }));
     rerender(<CommentWithIntl {...props} />);
     await waitFor(() => {
       expect(screen.getByText('Edit')).toBeVisible();

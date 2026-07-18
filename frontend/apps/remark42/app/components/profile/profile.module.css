@@ -102,6 +102,15 @@
   text-align: center;
 }
 
+.dataRemovalNotice {
+  font-size: 12px;
+  color: rgb(var(--secondary-text-color));
+
+  & a {
+    color: rgb(var(--primary-color));
+  }
+}
+
 .avatar {
   flex-shrink: 0;
   height: 32px;

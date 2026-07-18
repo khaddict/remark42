@@ -118,7 +118,7 @@ describe('<Profile />', () => {
     const { getByText, getByTitle, findByText, queryByTestId, queryByRole } = render(<Profile />);
 
     expect(getByTitle('Sign Out')).toBeInTheDocument();
-    expect(getByText('Request my data removal')).toBeInTheDocument();
+    expect(getByText('admin@remark42.com')).toBeInTheDocument();
     expect(await findByText("Don't have comments yet")).toBeInTheDocument();
     expect(queryByTestId('comments-counter')).not.toBeInTheDocument();
     expect(queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
@@ -135,7 +135,7 @@ describe('<Profile />', () => {
     expect(await findByText('My comments')).toBeInTheDocument();
     expect(queryByTestId('comments-counter')).toHaveTextContent(commentsStub.length.toString());
     expect(queryByTitle('Sign Out')).toBeInTheDocument();
-    expect(queryByText('Request my data removal')).toBeInTheDocument();
+    expect(queryByText('admin@remark42.com')).toBeInTheDocument();
     expect(queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
   });
 
@@ -149,7 +149,7 @@ describe('<Profile />', () => {
     expect(await findByText('My comments')).toBeInTheDocument();
     expect(queryByTestId('comments-counter')).toHaveTextContent(comments.length.toString());
     expect(queryByTitle('Sign Out')).toBeInTheDocument();
-    expect(queryByText('Request my data removal')).toBeInTheDocument();
+    expect(queryByText('admin@remark42.com')).toBeInTheDocument();
     expect(queryByRole('button', { name: /load more/i })).toBeInTheDocument();
   });
 

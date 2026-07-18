@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/mail"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/didip/tollbooth/v8"
 	"github.com/didip/tollbooth/v8/limiter"
-	log "github.com/go-pkgz/lgr"
 	R "github.com/go-pkgz/rest"
 	"github.com/umputun/remark42/backend/app/rest"
 	"github.com/umputun/remark42/backend/app/store"
@@ -262,8 +259,7 @@ func securityHeadersMiddleware(imageProxyEnabled bool, allowedAncestors []string
 			if len(allowedAncestors) > 0 {
 				frameAncestors = strings.Join(allowedAncestors, " ")
 			}
-			// font-src is set to 'none' (no @font-face / no base64 fonts in the bundle).
-			w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'self'; frame-src 'self' mailto:; img-src %s; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'none'; object-src 'none'; frame-ancestors %s;", imgSrc, frameAncestors))
+			w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'none'; base-uri 'none'; form-action 'none'; connect-src 'self'; frame-src 'self' mailto:; img-src %s; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none'; frame-ancestors %s;", imgSrc, frameAncestors))
 			w.Header().Set("Permissions-Policy", "accelerometer=(), autoplay=(), camera=(), cross-origin-isolated=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), keyboard-map=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(), usb=(), xr-spatial-tracking=(), clipboard-read=(), clipboard-write=(), gamepad=(), hid=(), idle-detection=(), interest-cohort=(), serial=(), unload=(), window-management=()")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -287,52 +283,6 @@ func subscribersOnly(enable bool) func(http.Handler) http.Handler {
 					return
 				}
 			}
-			h.ServeHTTP(w, r)
-		}
-		return http.HandlerFunc(fn)
-	}
-}
-
-// validEmailAuth is a middleware for auth endpoints for email method.
-// it rejects login request if user, site or email are suspicious
-func validEmailAuth() func(http.Handler) http.Handler {
-
-	reUser := regexp.MustCompile(`^[\p{L}\d\s_]{4,64}$`) // matches ui side validation, adding min/max limitation
-	reSite := regexp.MustCompile(`^[a-zA-Z\d\s_.-]{1,64}$`)
-
-	return func(h http.Handler) http.Handler {
-		fn := func(w http.ResponseWriter, r *http.Request) {
-
-			if r.URL.Path != "/auth/email/login" {
-				// not email login, skip the check
-				h.ServeHTTP(w, r)
-				return
-			}
-
-			if u := r.URL.Query().Get("user"); u != "" {
-				if !reUser.MatchString(u) {
-					log.Printf("[WARN] suspicious user rejected: %s", u)
-					http.Error(w, "Access denied", http.StatusForbidden)
-					return
-				}
-			}
-
-			if a := r.URL.Query().Get("address"); a != "" {
-				if _, err := mail.ParseAddress(a); err != nil {
-					log.Printf("[WARN] suspicious address rejected: %s", a)
-					http.Error(w, "Access denied", http.StatusForbidden)
-					return
-				}
-			}
-
-			if s := r.URL.Query().Get("site"); s != "" {
-				if !reSite.MatchString(s) {
-					log.Printf("[WARN] suspicious site rejected: %s", s)
-					http.Error(w, "Access denied", http.StatusForbidden)
-					return
-				}
-			}
-
 			h.ServeHTTP(w, r)
 		}
 		return http.HandlerFunc(fn)

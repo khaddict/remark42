@@ -23,7 +23,7 @@ export function filterTree(tree: Node[], fn: (node: Node) => boolean): Node[] {
   return newTree;
 }
 
-export function findPinnedComments(thread: Node): Comment[] {
+function findPinnedComments(thread: Node): Comment[] {
   let result: Comment[] = [];
 
   if (thread.comment.pin) {

@@ -4,13 +4,19 @@
   border: 0;
   margin: 0;
   padding: 4px;
-  transition: transform 0.15s ease-out;
-  border-radius: 2px;
+  transition:
+    transform 0.15s ease-out,
+    background-color 0.15s ease-out,
+    color 0.15s ease-out;
+  border-radius: 6px;
   appearance: none;
+  color: rgb(var(--secondary-text-color));
 
   &:hover {
     transform: scale(1.06);
     transition: transform 0.15s ease-in;
+    background-color: rgba(var(--primary-color), 0.08);
+    color: rgb(var(--primary-color));
   }
 
   &:active {

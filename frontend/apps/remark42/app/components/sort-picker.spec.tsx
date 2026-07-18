@@ -11,9 +11,11 @@ const defaultState = { comments: {} as StoreState['comments'], hiddenUsers: {} }
 
 describe('<SortPicker />', () => {
   it('should render sort picker with options', () => {
-    const { container, queryAllByText, queryByText } = render(<SortPicker />, defaultState);
+    const { queryAllByText, queryByText } = render(<SortPicker />, defaultState);
 
-    expect(container.querySelectorAll('option')).toHaveLength(8);
+    fireEvent.click(screen.getByText('Best'));
+
+    expect(screen.getAllByRole('option')).toHaveLength(4);
     expect(queryAllByText('Best')).toHaveLength(2);
     expect(queryByText('Sort by')).toBeInTheDocument();
   });
@@ -25,22 +27,21 @@ describe('<SortPicker />', () => {
   });
 
   it('should render selected element', () => {
-    render(<SortPicker />, { comments: { sort: '-active' } as StoreState['comments'] });
-    expect(screen.getAllByText<HTMLOptionElement>('Recently updated')[1].selected).toBeTruthy();
+    render(<SortPicker />, { comments: { sort: '-time' } as StoreState['comments'] });
+
+    fireEvent.click(screen.getAllByText('Newest')[0]);
+
+    expect(screen.getAllByText('Newest')[1]).toHaveAttribute('aria-selected', 'true');
   });
 
   it('should change selected store', async () => {
-    const nextOption = '-controversy';
+    const nextOption = '+score';
     const updateSorting = jest.spyOn(commentsActions, 'updateSorting');
-    const { container } = render(<SortPicker />, defaultState);
-    const select = container.querySelector('select') as HTMLSelectElement;
+    render(<SortPicker />, defaultState);
 
-    expect(select).toBeInTheDocument();
-
-    fireEvent.change(select, { target: { value: nextOption } });
+    fireEvent.click(screen.getByText('Best'));
+    fireEvent.click(screen.getByText('Worst'));
 
     await waitFor(() => expect(updateSorting).toHaveBeenCalledWith(nextOption));
-
-    expect(container.querySelector<HTMLOptionElement>(`[value="${nextOption}"]`)?.selected).toBeTruthy();
   });
 });

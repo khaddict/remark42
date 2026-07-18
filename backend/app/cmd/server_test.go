@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"math/rand"
@@ -15,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-pkgz/auth/v2/provider"
 	"github.com/go-pkgz/auth/v2/token"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jessevdk/go-flags"
@@ -62,282 +60,6 @@ func TestServerApp(t *testing.T) {
 	email, err := app.dataService.AdminStore.Email("")
 	assert.NoError(t, err)
 	assert.Equal(t, "admin@demo.remark42.com", email, "default admin email")
-
-	cancel()
-	app.Wait()
-}
-
-func TestServerApp_DevMode(t *testing.T) {
-	port := chooseRandomUnusedPort()
-	app, ctx, cancel := prepServerApp(t, func(o ServerCommand) ServerCommand {
-		o.Port = port
-		o.AdminPasswd = "password"
-		o.Auth.Dev = true
-		return o
-	})
-
-	go func() { _ = app.run(ctx) }()
-	waitForHTTPServerStart(port)
-
-	providers := app.restSrv.Authenticator.Providers()
-	require.Equal(t, 11+1, len(providers), "extra auth provider")
-	assert.Equal(t, "dev", providers[len(providers)-2].Name(), "dev auth provider")
-	// send ping
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/v1/ping", port))
-	defer http.DefaultClient.CloseIdleConnections()
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.NoError(t, resp.Body.Close())
-	assert.Equal(t, "pong", string(body))
-
-	cancel()
-	app.Wait()
-}
-
-func TestServerApp_CustomOAuthProvider(t *testing.T) {
-	port := chooseRandomUnusedPort()
-	app, ctx, cancel := prepServerApp(t, func(o ServerCommand) ServerCommand {
-		o.Port = port
-		o.Auth.Custom.Name = "oidc"
-		o.Auth.Custom.CID = "cid"
-		o.Auth.Custom.CSEC = "csec"
-		o.Auth.Custom.AuthURL = "https://example.com/oauth2/authorize"
-		o.Auth.Custom.TokenURL = "https://example.com/oauth2/token"
-		o.Auth.Custom.InfoURL = "https://example.com/oauth2/userinfo"
-		return o
-	})
-
-	go func() { _ = app.run(ctx) }()
-	waitForHTTPServerStart(port)
-
-	providers := app.restSrv.Authenticator.Providers()
-	require.Equal(t, 11+1, len(providers), "extra auth provider")
-	assert.Equal(t, "oidc", providers[len(providers)-2].Name(), "custom auth provider")
-
-	cancel()
-	app.Wait()
-}
-
-func TestServerApp_AnonMode(t *testing.T) {
-	port := chooseRandomUnusedPort()
-	app, ctx, cancel := prepServerApp(t, func(o ServerCommand) ServerCommand {
-		o.Port = port
-		o.Auth.Anonymous = true
-		return o
-	})
-
-	go func() { _ = app.run(ctx) }()
-	waitForHTTPServerStart(port)
-
-	providers := app.restSrv.Authenticator.Providers()
-	require.Equal(t, 11+1, len(providers), "extra auth provider for anon")
-	assert.Equal(t, "anonymous", providers[len(providers)-1].Name(), "anon auth provider")
-
-	client := http.Client{Timeout: 10 * time.Second}
-	defer client.CloseIdleConnections()
-
-	// send ping
-	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/api/v1/ping", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.Equal(t, "pong", string(body))
-
-	// try to login with good name
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=blah123&aud=remark", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// try to add a comment as good anonymous
-	req, err := http.NewRequest("POST", fmt.Sprintf("http://localhost:%d/api/v1/comment?site=remark", port),
-		strings.NewReader(`{"text": "test 123", "locator":{"url": "https://radio-t.com/blah1", "site": "remark"}}`))
-	require.NoError(t, err)
-
-	tkn, claims := getAuthFromCookie(t, app, resp)
-	require.NotEmpty(t, tkn)
-	assert.False(t, claims.User.BoolAttr("blocked"), "should not be blocked")
-	req.Header.Add("X-JWT", tkn)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusCreated, resp.StatusCode)
-
-	// try to login with non-latin name
-	time.Sleep(time.Second)
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=Раз_Два%20%20Три_34567&aud=remark", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// try to login with bad name
-	time.Sleep(time.Second)
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=**blah123&aud=remark", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-
-	// try to login with short name
-	time.Sleep(time.Second)
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=bl%%20%%20&aud=remark", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-
-	// try to login with name what have space in prefix
-	time.Sleep(time.Second)
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=%%20somebody&aud=remark", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-
-	// try to login with name what have space in suffix
-	time.Sleep(time.Second)
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=somebody%%20&aud=remark", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-
-	// try to login with long name
-	time.Sleep(time.Second)
-	ln := strings.Repeat("x", 65)
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=%s&aud=remark", port, ln))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusForbidden, resp.StatusCode)
-
-	// try to login with admin name
-	time.Sleep(time.Second)
-	resp, err = client.Get(fmt.Sprintf("http://localhost:%d/auth/anonymous/login?user=umpUtun&aud=remark", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// try to add a comment as anonymous with admin name
-	time.Sleep(time.Second)
-	req, err = http.NewRequest("POST", fmt.Sprintf("http://localhost:%d/api/v1/comment?site=remark", port),
-		strings.NewReader(`{"text": "test 123", "locator":{"url": "https://radio-t.com/blah1", "site": "remark"}}`))
-	require.NoError(t, err)
-
-	tkn, claims = getAuthFromCookie(t, app, resp)
-	require.NotEmpty(t, tkn)
-	assert.True(t, claims.User.BoolAttr("blocked"), "should be blocked")
-	req.Header.Add("X-JWT", tkn)
-	resp, err = client.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-
-	cancel()
-	app.Wait()
-}
-
-func getAuthFromCookie(t *testing.T, app *serverApp, resp *http.Response) (tkn string, claims token.Claims) {
-	var err error
-	for _, c := range resp.Cookies() {
-		if c.Name == "JWT" {
-			tkn = c.Value
-			claims, err = app.restSrv.Authenticator.TokenService().Parse(c.Value)
-			require.NoError(t, err)
-		}
-	}
-	return tkn, claims
-}
-
-func TestServerApp_WithSSL(t *testing.T) {
-	opts := ServerCommand{}
-	sslPort := chooseRandomUnusedPort()
-	opts.SetCommon(CommonOpts{RemarkURL: fmt.Sprintf("https://localhost:%d", sslPort), SharedSecret: "123456"})
-
-	// prepare options
-	p := flags.NewParser(&opts, flags.Default)
-	port := chooseRandomUnusedPort()
-	_, err := p.ParseArgs([]string{"--admin-passwd=password", "--port=" + strconv.Itoa(port), "--store.bolt.path=/tmp/xyz", "--backup=/tmp",
-		"--avatar.type=bolt", "--avatar.bolt.file=/tmp/ava-test.db",
-		"--ssl.type=static", "--ssl.cert=testdata/cert.pem", "--ssl.key=testdata/key.pem",
-		"--ssl.port=" + strconv.Itoa(sslPort), "--image.fs.path=/tmp"})
-	require.NoError(t, err)
-	defer os.Remove("/tmp/xyz")
-	defer os.Remove("/tmp/xyz/remark.db")
-	defer os.Remove("/tmp/ava-test.db")
-
-	// create app
-	app, err := opts.newServerApp(context.Background())
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = app.run(ctx) }()
-	waitForHTTPSServerStart(sslPort)
-
-	client := http.Client{
-		// prevent http redirect
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-
-		// allow self-signed certificate
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-	defer client.CloseIdleConnections()
-
-	// check http to https redirect response
-	resp, err := client.Get(fmt.Sprintf("http://localhost:%d/blah?param=1", port))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusTemporaryRedirect, resp.StatusCode)
-	assert.Equal(t, fmt.Sprintf("https://localhost:%d/blah?param=1", sslPort), resp.Header.Get("Location"))
-
-	// check https server
-	resp, err = client.Get(fmt.Sprintf("https://localhost:%d/ping", sslPort))
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.Equal(t, "pong", string(body))
-
-	cancel()
-	app.Wait()
-}
-
-func TestServerApp_WithRemote(t *testing.T) {
-	opts := ServerCommand{}
-	opts.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "123456"})
-
-	// prepare options
-	p := flags.NewParser(&opts, flags.Default)
-	port := chooseRandomUnusedPort()
-	_, err := p.ParseArgs([]string{"--admin-passwd=password", "--cache.type=none",
-		"--store.type=rpc", "--store.rpc.api=http://127.0.0.1",
-		"--port=" + strconv.Itoa(port), "--avatar.fs.path=/tmp",
-		"--admin.type=rpc", "--admin.rpc.secret_per_site", "--admin.rpc.api=http://127.0.0.1"})
-	require.NoError(t, err)
-	opts.Auth.Github.CSEC, opts.Auth.Github.CID = "csec", "cid"
-	opts.BackupLocation, opts.Image.FS.Path = "/tmp", "/tmp"
-
-	// create app
-	app, err := opts.newServerApp(context.Background())
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() { _ = app.run(ctx) }()
-	waitForHTTPServerStart(port)
-
-	// send ping
-	resp, err := http.Get(fmt.Sprintf("http://localhost:%d/api/v1/ping", port))
-	defer http.DefaultClient.CloseIdleConnections()
-	require.NoError(t, err)
-	defer resp.Body.Close()
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body, err := io.ReadAll(resp.Body)
-	assert.NoError(t, err)
-	assert.Equal(t, "pong", string(body))
 
 	cancel()
 	app.Wait()
@@ -398,121 +120,6 @@ func TestServerApp_Failed(t *testing.T) {
 	_, err = opts.newServerApp(context.Background())
 	assert.EqualError(t, err, "failed to make data store engine: unsupported store type blah")
 	t.Log(err)
-
-	// wrong redis location
-	opts = ServerCommand{}
-	opts.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "123456"})
-	p = flags.NewParser(&opts, flags.Default)
-	_, err = p.ParseArgs([]string{"--store.bolt.path=/tmp", "--cache.type=redis_pub_sub", "--cache.redis_addr=wrong_address"})
-	assert.NoError(t, err)
-	_, err = opts.newServerApp(context.Background())
-	assert.EqualError(t, err,
-		"failed to make cache: cache backend initialization, redis PubSub initialisation: "+
-			"problem subscribing to channel remark42-cache on address wrong_address: "+
-			"dial tcp: address wrong_address: missing port in address")
-	t.Log(err)
-
-	// wrong apple private key type
-	opts = ServerCommand{}
-	opts.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "123456"})
-	p = flags.NewParser(&opts, flags.Default)
-	_, err = p.ParseArgs([]string{"--auth.apple.cid=123", "--auth.apple.tid=123",
-		"--auth.apple.kid=123", "--auth.apple.private-key-filepath=testdata/apple-bad.p8"})
-	assert.NoError(t, err)
-	_, err = opts.newServerApp(context.Background())
-	assert.EqualError(t, err,
-		"failed to make authenticator: an AppleProvider creating failed: "+
-			"provided private key is not ECDSA")
-	t.Log(err)
-
-	// incomplete custom oauth config
-	opts = ServerCommand{}
-	opts.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "123456"})
-	p = flags.NewParser(&opts, flags.Default)
-	_, err = p.ParseArgs([]string{"--store.bolt.path=/tmp", "--backup=/tmp", "--image.fs.path=/tmp", "--auth.custom.name=oidc", "--auth.custom.cid=123"})
-	assert.NoError(t, err)
-	_, err = opts.newServerApp(context.Background())
-	assert.EqualError(t, err,
-		"failed to make authenticator: custom oauth provider configuration is incomplete, missing: "+
-			"AUTH_CUSTOM_CSEC, AUTH_CUSTOM_AUTH_URL, AUTH_CUSTOM_TOKEN_URL, AUTH_CUSTOM_INFO_URL")
-	t.Log(err)
-}
-
-func TestIsReservedCustomProviderName(t *testing.T) {
-	reserved := []string{
-		"email", "anonymous", "google", "github", "facebook", "yandex", "twitter",
-		"microsoft", "patreon", "discord", "telegram", "dev", "apple",
-	}
-
-	for _, name := range reserved {
-		t.Run(name, func(t *testing.T) {
-			assert.True(t, isReservedCustomProviderName(name))
-		})
-	}
-
-	assert.False(t, isReservedCustomProviderName("oidc"))
-}
-
-func TestIsValidCustomProviderName(t *testing.T) {
-	valid := []string{"oidc", "codeberg", "provider_1", "provider-1", "a1"}
-	for _, name := range valid {
-		t.Run("valid_"+name, func(t *testing.T) {
-			assert.True(t, isValidCustomProviderName(name))
-		})
-	}
-
-	invalid := []string{"", " has-space", "has space", "Uppercase", "provider!", "-provider", "_provider"}
-	for _, name := range invalid {
-		t.Run("invalid_"+strings.ReplaceAll(name, " ", "_"), func(t *testing.T) {
-			assert.False(t, isValidCustomProviderName(name))
-		})
-	}
-}
-
-func TestCustomProviderSourceID(t *testing.T) {
-	cfg := CustomAuthGroup{IDField: "sub", EmailField: "email", NameField: "name", PictureField: "picture"}
-
-	assert.Equal(t, "user-1", customProviderSourceID(provider.UserData{"sub": "user-1", "email": "a@example.com"}, cfg))
-	assert.Equal(t, "a@example.com", customProviderSourceID(provider.UserData{"email": "a@example.com"}, cfg))
-	assert.Equal(t, "alice", customProviderSourceID(provider.UserData{"name": "alice"}, cfg))
-	assert.Equal(t, "https://example.com/avatar.png", customProviderSourceID(provider.UserData{"picture": "https://example.com/avatar.png"}, cfg))
-	assert.Equal(t, `{"login":"alice"}`, customProviderSourceID(provider.UserData{"login": "alice"}, cfg))
-	assert.Equal(t, "{}", customProviderSourceID(provider.UserData{}, cfg))
-}
-
-func TestServerApp_InvalidCustomOAuthProviderName(t *testing.T) {
-	baseArgs := []string{
-		"--store.bolt.path=/tmp",
-		"--backup=/tmp",
-		"--image.fs.path=/tmp",
-		"--auth.custom.cid=123",
-		"--auth.custom.csec=456",
-		"--auth.custom.auth-url=https://example.com/oauth2/authorize",
-		"--auth.custom.token-url=https://example.com/oauth2/token",
-		"--auth.custom.info-url=https://example.com/oauth2/userinfo",
-	}
-
-	t.Run("reserved", func(t *testing.T) {
-		opts := ServerCommand{}
-		opts.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "123456"})
-		p := flags.NewParser(&opts, flags.Default)
-		_, err := p.ParseArgs(append(baseArgs, "--auth.custom.name=twitter"))
-		require.NoError(t, err)
-
-		_, err = opts.newServerApp(context.Background())
-		assert.EqualError(t, err, `failed to make authenticator: custom oauth provider name "twitter" is reserved`)
-	})
-
-	t.Run("not_url_safe", func(t *testing.T) {
-		opts := ServerCommand{}
-		opts.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "123456"})
-		p := flags.NewParser(&opts, flags.Default)
-		_, err := p.ParseArgs(append(baseArgs, "--auth.custom.name=bad name"))
-		require.NoError(t, err)
-
-		_, err = opts.newServerApp(context.Background())
-		assert.EqualError(t, err, `failed to make authenticator: custom oauth provider name "bad name" is invalid, expected pattern "^[a-z0-9][a-z0-9_-]*$"`)
-	})
 }
 
 func TestServerApp_Shutdown(t *testing.T) {
@@ -544,11 +151,10 @@ func TestServerApp_MainSignal(t *testing.T) {
 
 	p := flags.NewParser(&s, flags.Default)
 	port := chooseRandomUnusedPort()
-	args := []string{"test", "--store.bolt.path=/tmp/xyz", "--backup=/tmp", "--avatar.type=bolt",
-		"--avatar.bolt.file=/tmp/ava-test.db", "--port=" + strconv.Itoa(port), "--image.fs.path=/tmp"}
+	args := []string{"test", "--store.bolt.path=/tmp/xyz", "--backup=/tmp",
+		"--port=" + strconv.Itoa(port), "--image.fs.path=/tmp"}
 	defer os.Remove("/tmp/xyz")
 	defer os.Remove("/tmp/xyz/remark.db")
-	defer os.Remove("/tmp/ava-test.db")
 	_, err := p.ParseArgs(args)
 	require.NoError(t, err)
 	st := time.Now()
@@ -594,58 +200,21 @@ func TestServerApp_DeprecatedArgs(t *testing.T) {
 	args := []string{
 		"test",
 		"--notify.type=email",
-		"--notify.type=telegram",
 		"--notify.users=none",
 		"--notify.admins=none",
 		"--img-proxy",
 		"--notify.email.notify_admin",
-		"--auth.email.host=smtp.example.org",
-		"--auth.email.port=666",
-		"--auth.email.tls",
-		"--auth.email.user=test_user",
-		"--auth.email.passwd=test_password",
-		"--auth.email.timeout=15s",
-		"--auth.email.template=file.tmpl",
-		"--notify.telegram.token=abcd",
-		"--notify.telegram.timeout=3m",
-		"--notify.telegram.api=http://example.org",
-		"--auth.twitter.cid=123",
-		"--auth.twitter.csec=456",
 	}
-	assert.Empty(t, s.SMTP.Host)
-	assert.Empty(t, s.SMTP.Port)
-	assert.Empty(t, s.SMTP.TLS)
-	assert.Empty(t, s.SMTP.Username)
-	assert.Empty(t, s.SMTP.Password)
-	assert.Empty(t, s.SMTP.TimeOut)
 	_, err := p.ParseArgs(args)
 	require.NoError(t, err)
 	deprecatedFlags := s.HandleDeprecatedFlags()
 	assert.ElementsMatch(t,
 		[]DeprecatedFlag{
-			{Old: "auth.email.host", New: "smtp.host", Version: "1.5"},
-			{Old: "auth.email.port", New: "smtp.port", Version: "1.5"},
-			{Old: "auth.email.tls", New: "smtp.tls", Version: "1.5"},
-			{Old: "auth.email.user", New: "smtp.username", Version: "1.5"},
-			{Old: "auth.email.passwd", New: "smtp.password", Version: "1.5"},
-			{Old: "auth.email.timeout", New: "smtp.timeout", Version: "1.5"},
-			{Old: "auth.email.template", Version: "1.5"},
 			{Old: "img-proxy", New: "image-proxy.http2https", Version: "1.5"},
 			{Old: "notify.email.notify_admin", New: "notify.admins=email", Version: "1.9"},
 			{Old: "notify.type", New: "notify.(users|admins)", Version: "1.9"},
-			{Old: "notify.telegram.token", New: "telegram.token", Version: "1.9"},
-			{Old: "notify.telegram.timeout", New: "telegram.timeout", Version: "1.9"},
-			{Old: "notify.telegram.api", Version: "1.9"},
-			{Old: "auth.twitter.cid", Version: "1.14"},
-			{Old: "auth.twitter.csec", Version: "1.14"},
 		},
 		deprecatedFlags)
-	assert.Equal(t, "smtp.example.org", s.SMTP.Host)
-	assert.Equal(t, 666, s.SMTP.Port)
-	assert.Equal(t, true, s.SMTP.TLS)
-	assert.Equal(t, "test_user", s.SMTP.Username)
-	assert.Equal(t, "test_password", s.SMTP.Password)
-	assert.Equal(t, 15*time.Second, s.SMTP.TimeOut)
 }
 
 func TestServerApp_DeprecatedArgsCollisions(t *testing.T) {
@@ -655,23 +224,9 @@ func TestServerApp_DeprecatedArgsCollisions(t *testing.T) {
 	p := flags.NewParser(&s, flags.Default)
 	args := []string{
 		"test",
-		"--auth.email.host=smtp-old.example.org",
-		"--smtp.host=smtp-new.example.org",
-		"--auth.email.port=666",
-		"--smtp.port=999",
-		"--auth.email.user=test_user",
-		"--smtp.username=new_test_user",
-		"--auth.email.passwd=test_password",
-		"--smtp.password=new_test_password",
-		"--auth.email.timeout=15s",
-		"--smtp.timeout=20s",
-		"--notify.type=telegram",
-		"--notify.users=telegram",
+		"--notify.type=email",
+		"--notify.users=email",
 		"--notify.admins=none",
-		"--notify.telegram.token=abcd",
-		"--telegram.token=dcba",
-		"--notify.telegram.timeout=3m",
-		"--telegram.timeout=5m",
 	}
 	_, err := p.ParseArgs(args)
 	require.NoError(t, err)
@@ -679,13 +234,6 @@ func TestServerApp_DeprecatedArgsCollisions(t *testing.T) {
 	assert.ElementsMatch(t,
 		[]DeprecatedFlag{
 			{Old: "notify.type", New: "notify.(users|admins)", Collision: true},
-			{Old: "auth.email.host", New: "smtp.host", Collision: true},
-			{Old: "auth.email.port", New: "smtp.port", Collision: true},
-			{Old: "auth.email.user", New: "smtp.username", Collision: true},
-			{Old: "auth.email.passwd", New: "smtp.password", Collision: true},
-			{Old: "auth.email.timeout", New: "smtp.timeout", Collision: true},
-			{Old: "notify.telegram.token", New: "telegram.token", Collision: true},
-			{Old: "notify.telegram.timeout", New: "telegram.timeout", Collision: true},
 		},
 		deprecatedFlagsCollisions)
 
@@ -693,57 +241,11 @@ func TestServerApp_DeprecatedArgsCollisions(t *testing.T) {
 	s = ServerCommand{}
 	s.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "123456"})
 	p = flags.NewParser(&s, flags.Default)
-	args = []string{
-		"test",
-		"--auth.email.host=smtp-old.example.org",
-		"--smtp.host=''",
-	}
+	args = []string{"test"}
 	_, err = p.ParseArgs(args)
 	require.NoError(t, err)
 	deprecatedFlagsCollisions = s.findDeprecatedFlagsCollisions()
 	assert.Empty(t, []DeprecatedFlag{}, deprecatedFlagsCollisions)
-}
-
-func Test_ACMEEmail(t *testing.T) {
-	cmd := ServerCommand{}
-	cmd.SetCommon(CommonOpts{RemarkURL: "https://remark.com:443", SharedSecret: "123456"})
-	p := flags.NewParser(&cmd, flags.Default)
-	args := []string{"--ssl.type=auto"}
-	_, err := p.ParseArgs(args)
-	require.NoError(t, err)
-	cfg, err := cmd.makeSSLConfig()
-	require.NoError(t, err)
-	assert.Equal(t, "admin@remark.com", cfg.ACMEEmail)
-
-	cmd = ServerCommand{}
-	cmd.SetCommon(CommonOpts{RemarkURL: "https://remark.com", SharedSecret: "123456"})
-	p = flags.NewParser(&cmd, flags.Default)
-	args = []string{"--ssl.type=auto", "--ssl.acme-email=adminname@adminhost.com"}
-	_, err = p.ParseArgs(args)
-	require.NoError(t, err)
-	cfg, err = cmd.makeSSLConfig()
-	require.NoError(t, err)
-	assert.Equal(t, "adminname@adminhost.com", cfg.ACMEEmail)
-
-	cmd = ServerCommand{}
-	cmd.SetCommon(CommonOpts{RemarkURL: "https://remark.com", SharedSecret: "123456"})
-	p = flags.NewParser(&cmd, flags.Default)
-	args = []string{"--ssl.type=auto", "--admin.type=shared", "--admin.shared.email=superadmin@admin.com"}
-	_, err = p.ParseArgs(args)
-	require.NoError(t, err)
-	cfg, err = cmd.makeSSLConfig()
-	require.NoError(t, err)
-	assert.Equal(t, "superadmin@admin.com", cfg.ACMEEmail)
-
-	cmd = ServerCommand{}
-	cmd.SetCommon(CommonOpts{RemarkURL: "https://remark.com:443", SharedSecret: "123456"})
-	p = flags.NewParser(&cmd, flags.Default)
-	args = []string{"--ssl.type=auto", "--admin.type=shared"}
-	_, err = p.ParseArgs(args)
-	require.NoError(t, err)
-	cfg, err = cmd.makeSSLConfig()
-	require.NoError(t, err)
-	assert.Equal(t, "admin@remark.com", cfg.ACMEEmail)
 }
 
 func TestServerAuthHooks(t *testing.T) {
@@ -896,28 +398,6 @@ func TestServerCommand_parseSameSite(t *testing.T) {
 	}
 }
 
-func Test_splitAtCommas(t *testing.T) {
-	tbl := []struct {
-		inp string
-		res []string
-	}{
-		{"a string", []string{"a string"}},
-		{"vv1, vv2, vv3", []string{"vv1", "vv2", "vv3"}},
-		{`"vv1, blah", vv2, vv3`, []string{"vv1, blah", "vv2", "vv3"}},
-		{
-			`Access-Control-Allow-Headers:"DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type",header123:val, foo:"bar1,bar2"`,
-			[]string{"Access-Control-Allow-Headers:\"DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type\"", "header123:val", "foo:\"bar1,bar2\""},
-		},
-		{"", []string{}},
-	}
-
-	for i, tt := range tbl {
-		t.Run(strconv.Itoa(i), func(t *testing.T) {
-			assert.Equal(t, tt.res, splitAtCommas(tt.inp))
-		})
-	}
-}
-
 func Test_getAllowedDomains(t *testing.T) {
 	tbl := []struct {
 		s              ServerCommand
@@ -992,18 +472,6 @@ func waitForHTTPServerStart(port int) {
 	}
 }
 
-func waitForHTTPSServerStart(port int) {
-	// wait for up to 3 seconds for HTTPS server to start
-	for range 300 {
-		time.Sleep(time.Millisecond * 10)
-		conn, _ := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", port), time.Millisecond*10)
-		if conn != nil {
-			_ = conn.Close()
-			break
-		}
-	}
-}
-
 func prepServerApp(t *testing.T, fn func(o ServerCommand) ServerCommand) (*serverApp, context.Context, context.CancelFunc) {
 	cmd := ServerCommand{}
 	cmd.SetCommon(CommonOpts{RemarkURL: "https://demo.remark42.com", SharedSecret: "secret"})
@@ -1014,20 +482,7 @@ func prepServerApp(t *testing.T, fn func(o ServerCommand) ServerCommand) (*serve
 	require.NoError(t, err)
 	cmd.Avatar.FS.Path, cmd.Avatar.Type, cmd.BackupLocation, cmd.Image.FS.Path = "/tmp/remark42_test", "fs", "/tmp/remark42_test", "/tmp/remark42_test"
 	cmd.Store.Bolt.Timeout = 10 * time.Second
-	cmd.Auth.Apple.CID, cmd.Auth.Apple.KID, cmd.Auth.Apple.TID = "cid", "kid", "tid"
-	cmd.Auth.Apple.PrivateKeyFilePath = "testdata/apple.p8"
 	cmd.Auth.Github.CSEC, cmd.Auth.Github.CID = "csec", "cid"
-	cmd.Auth.Google.CSEC, cmd.Auth.Google.CID = "csec", "cid"
-	cmd.Auth.Facebook.CSEC, cmd.Auth.Facebook.CID = "csec", "cid"
-	cmd.Auth.Yandex.CSEC, cmd.Auth.Yandex.CID = "csec", "cid"
-	cmd.Auth.Microsoft.CSEC, cmd.Auth.Microsoft.CID = "csec", "cid"
-	cmd.Auth.Twitter.CSEC, cmd.Auth.Twitter.CID = "csec", "cid"
-	cmd.Auth.Patreon.CSEC, cmd.Auth.Patreon.CID = "csec", "cid"
-	cmd.Auth.Discord.CSEC, cmd.Auth.Discord.CID = "csec", "cid"
-	cmd.Auth.Telegram = true
-	cmd.Telegram.Token = "token"
-	cmd.Auth.Email.Enable = true
-	cmd.Auth.Email.MsgTemplate = "testdata/email.tmpl"
 	cmd.BackupLocation = "/tmp"
 	cmd.Notify.Users = []string{"email"}
 	cmd.Notify.Admins = []string{"email"}
